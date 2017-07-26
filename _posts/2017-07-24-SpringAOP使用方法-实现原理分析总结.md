@@ -8,10 +8,10 @@ catalog: true
 tags:
     - Spring
 ---
-&emsp;&emsp;AOP(Aspect Orient Programming),面向切面编程。作为面向对象编程的一种补充，广泛应用于处理一些具有横切性质的系统级服务，如事务管理，安全检查，异常处理，日志记录等。AOP实现的关键就在于AOP框架自动创建的AOP代理，AOP代理又可分为静态代理与动态代理两大类，如下图所示：
+AOP(Aspect Orient Programming),面向切面编程。作为面向对象编程的一种补充，广泛应用于处理一些具有横切性质的系统级服务，如事务管理，安全检查，异常处理，日志记录等。AOP实现的关键就在于AOP框架自动创建的AOP代理，AOP代理又可分为静态代理与动态代理两大类，如下图所示：
 ![AOP代理图](/img/2017-07-24/aop代理图.png)
 &emsp;&emsp;静态代理是指使用AOP框架提供的命令进行编译，从而在编译阶段生成AOP代理类，也称为编译时增强，常用的框架有AspectJ；而动态代理则在运行时借助于JDK动态代理、CGLIB等在内存中临时生成AOP代理类，也被称为运行时增强。  
-&emsp;&emsp;被代理的类如果实现了某个接口，Spring会采用JDK反射方式进行动态代理，否则使用CGLib动态代理。
+&emsp;&emsp;被代理的类如果实现了某个接口，Spring会采用JDK反射方式进行动态代理，否则使用CGLib动态代理。  
 &emsp;&emsp;对于静态代理AspectJ使用方式不再过多介绍，接下来主要介绍Spring框架中AOP的使用方法及我使用过程中发现的问题，并从AOP动态代理实现角度分析为何会出现这样的问题。  
 
 _ _ _
@@ -191,14 +191,14 @@ _ _ _
         }
     }
 ```
-&emsp;&emsp;运行此段代码后发现this.toString()方法与AopContext.currentProxy().toString()方法输出相同，但this == 代理对象?输出为false。由于java中 = = 操作符号比较的是两个对象的内存地址，所以执行addUser方法的当前对象与代理对象确实是两个对象，不通过代理对象直接调用本类中的其它方法没有切面效果是可以理解的，上面问题得到解决。
+&emsp;&emsp;运行此段代码后发现this.toString()方法与AopContext.currentProxy().toString()方法输出相同，但this == 代理对象?输出为false。由于java中 = = 操作符号比较的是两个对象的内存地址，所以执行addUser方法的当前对象与代理对象确实是两个对象，不通过代理对象直接调用本类中的其它方法没有切面效果是可以理解的，上面问题得到解决。  
 &emsp;&emsp;但是toString()方法输出内容相同，两个属于不同类的对象均调用默认的toString()方法，理论上来说结果不可能相同，难道当前对象的toString()方法也被默认代理了，执行AopContext.currentProxy().toString()实际执行的是当前对象的toString()方法? 由于当前类采用的AOP实现方式是JDK动态代理，等下会通过分析JDK动态代理实现机制来解释这个问题。
 
-- 一个方法被多个切面增强，此方法被调用时各个切面的执行顺序如何判断。
+- 一个方法被多个切面增强，此方法被调用时各个切面的执行顺序如何判断。  
 	未完待续。。
 
 _ _ _
-### **3. 探究为何会存在2中的问题**
+### **3. 探究为何会存在2中的问题**  
 
 - 分析JDK动态代理实现机制  
 
@@ -246,9 +246,9 @@ _ _ _
         }        
     }
 ```
-&emsp;&emsp;输出结果：
-&emsp;&emsp;&emsp;&emsp;准备输出hello world
-&emsp;&emsp;&emsp;&emsp;hello world！
+&emsp;&emsp;输出结果：  
+&emsp;&emsp;&emsp;&emsp;准备输出hello world  
+&emsp;&emsp;&emsp;&emsp;hello world！  
 &emsp;&emsp;实现了代理效果。反编译jdk生成的动态代理代码如下：
 ```java
     public final class $Proxy0 extends Proxy implements HelloWorld {
@@ -315,11 +315,11 @@ _ _ _
         }
     }
 ```
-&emsp;&emsp;生成的代码十分清晰，一目了然，代理类除了代理HelloWorld接口中的sayHello()方法之外，还将自身的equals(),hashCode(),toString()方法交给被代理类来执行，也就是说我们在使用代理类执行这三个方法时，实际执行的是被代理类(本例中为HelloWorldImpl)的equals(), hashCode(), toString()方法，这也就解释了上面的为何被代理类与代理类toString()方法输出的内容完全相同的问题。
-&emsp;&emsp;学习JDK实现机制中尚未解决的问题：查资料见到有人说因为是Java中不允许多重继承，JDK生成的代理类已经继承了Proxy类，所以不能再继承要被代理的类，所以JDK动态代理要求被代理类必须实现接口，那么JDK生成的代理类为何必须要继承Proxy类呢？？？
+&emsp;&emsp;生成的代码十分清晰，一目了然，代理类除了代理HelloWorld接口中的sayHello()方法之外，还将自身的equals(),hashCode(),toString()方法交给被代理类来执行，也就是说我们在使用代理类执行这三个方法时，实际执行的是被代理类(本例中为HelloWorldImpl)的equals(), hashCode(), toString()方法，这也就解释了上面的为何被代理类与代理类toString()方法输出的内容完全相同的问题。  
+&emsp;&emsp;学习JDK实现动态代理机制中尚未解决的问题：查资料见到有人说因为是Java中不允许多重继承，JDK生成的代理类已经继承了Proxy类，所以不能再继承要被代理的类，所以JDK动态代理要求被代理类必须实现接口，那么JDK生成的代理类为何必须要继承Proxy类呢？？？  
 &emsp;&emsp;未完待续。。
-- 分析CGLib动态代理实现机制
+- 分析CGLib动态代理实现机制  
 	未完待续。。
-- 分析Spring AOP实现机制
+- 分析Spring AOP实现机制  
 	未完待续。。
 
