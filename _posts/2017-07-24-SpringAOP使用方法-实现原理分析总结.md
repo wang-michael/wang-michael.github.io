@@ -165,9 +165,9 @@ SpringMVC-servlet.xml文件中增加一句代码：
 &emsp;&emsp;之后在浏览器中访问/addUser对应的链接，会发现在UserService类的addUser方法被调用之前，确实调用了切面中的beforeTest方法。可知实际执行的绝不是UserService对象的方法，而是由AOP产生的代理对象的方法。  
 
 _ _ _
-### **2. 使用Spring AOP过程中不解的问题**
+### **2. 使用Spring AOP过程中遇到的问题**
 
-- 从一Bean的被切面增强的方法中使用this调用此Bean另一个被切面增强的方法，被调用的方法无切面增强效果。
+（1）从一Bean的被切面增强的方法中使用this调用此Bean另一个被切面增强的方法，被调用的方法无切面增强效果。
 
 &emsp;&emsp;代码示例如下：
 ```java
@@ -193,19 +193,7 @@ _ _ _
     }
 ```
 &emsp;&emsp;运行此段代码后发现this.toString()方法与AopContext.currentProxy().toString()方法输出相同，但this == 代理对象?输出为false。由于java中 = = 操作符号比较的是两个对象的内存地址，所以执行addUser方法的当前对象与代理对象确实是两个对象，不通过代理对象直接调用本类中的其它方法没有切面效果是可以理解的，上面问题得到解决。  
-&emsp;&emsp;但是toString()方法输出内容相同，两个属于不同类的对象均调用默认的toString()方法，理论上来说结果不可能相同，难道当前对象的toString()方法也被默认代理了，执行AopContext.currentProxy().toString()实际执行的是当前对象的toString()方法? 由于当前类采用的AOP实现方式是JDK动态代理，等下会通过分析JDK动态代理实现机制来解释这个问题。
-
-- 一个方法被多个切面增强，此方法被调用时各个切面的执行顺序如何判断。  
-	未完待续。。  
-    
-- 一个方法被多个切面增强，这个方法所在的类是如何被Spring代理的？？？  
-	未完待续。。  
-    
-- 如何保存Spring AOP自动生成的代理类  
-	未完待续。。  
-
-_ _ _
-### **3. 探究为何会存在2中的问题**  
+&emsp;&emsp;但是toString()方法输出内容相同，两个属于不同类的对象均调用默认的toString()方法，理论上来说结果不可能相同，难道当前对象的toString()方法也被默认代理了，执行AopContext.currentProxy().toString()实际执行的是当前对象的toString()方法? 由于当前类采用的AOP实现方式是JDK动态代理，接下来通过分析Spring动态代理实现机制来解释这个问题。
 
 - 分析JDK动态代理实现机制  
 
@@ -329,4 +317,172 @@ _ _ _
 	未完待续。。
 - 分析Spring AOP实现机制  
 	未完待续。。
+- 如何保存Spring AOP自动生成的代理类  
+	未完待续。。  
+
+(2)一个方法被多个切面增强，此方法被调用时各个切面的执行顺序如何判断？  
+
+&emsp;&emsp;对于在同一个切面定义的通知函数将会根据在类中的声明顺序执行。如下所示:
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+    <beans xmlns="http://www.springframework.org/schema/beans"
+           xmlns:context="http://www.springframework.org/schema/context"
+           xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:aop="http://www.springframework.org/schema/aop"
+           xsi:schemaLocation="http://www.springframework.org/schema/beans
+                http://www.springframework.org/schema/beans/spring-beans.xsd
+                http://www.springframework.org/schema/context
+                http://www.springframework.org/schema/context/spring-context-4.1.xsd http://www.springframework.org/schema/aop http://www.springframework.org/schema/aop/spring-aop.xsd">
+           <context:component-scan base-package="com.AOPTest"/>
+           <context:annotation-config/>
+            <aop:aspectj-autoproxy  expose-proxy="true"/>
+    </beans>
+```
+
+```java
+    @Component
+    @Aspect
+    public class InOneAspect {
+        /**
+         * Pointcut定义切点函数
+         */
+        @Pointcut("execution(* com.AOPTest.MyBean.*(..))")
+        private void myPointcut(){}
+
+        @Before("myPointcut()")
+        public void beforeOne(){
+            System.out.println("前置通知....执行顺序1");
+        }
+
+        @Before("myPointcut()")
+        public void beforeTwo(){
+            System.out.println("前置通知....执行顺序2");
+        }
+
+        @AfterReturning(value = "myPointcut()")
+        public void AfterReturningThree(){
+            System.out.println("后置通知....执行顺序3");
+        }
+
+        @AfterReturning(value = "myPointcut()")
+        public void AfterReturningFour(){
+            System.out.println("后置通知....执行顺序4");
+        }
+    }
+    @Component
+    public class MyBean implements MyBeanInterface {
+        @Override
+        public void sayHello() {
+            System.out.println("Hello!");
+        }
+    }
+    public class Main {
+        public static void main(String[] args) {
+            ApplicationContext context = new ClassPathXmlApplicationContext(
+                    "/applicationContext.xml", Main.class
+            );
+            MyBeanInterface myBean = context.getBean(MyBeanInterface.class);
+            myBean.sayHello();
+        }
+    }
+```
+输出结果：  
+&emsp;&emsp;前置通知....执行顺序1  
+&emsp;&emsp;前置通知....执行顺序2  
+&emsp;&emsp;Hello!  
+&emsp;&emsp;后置通知....执行顺序4  
+&emsp;&emsp;后置通知....执行顺序3  
+
+&emsp;&emsp;如果在不同的切面中定义多个通知响应同一个切点，进入时则优先级高的切面类中的通知函数优先执行，退出时则最后执行，优先级由切面类实现的Ordered接口中getOrder方法返回值确定，返回值越小，优先级越高。如下：  
+```xml
+    <?xml version="1.0" encoding="UTF-8"?>
+    <beans xmlns="http://www.springframework.org/schema/beans"
+           xmlns:context="http://www.springframework.org/schema/context"
+           xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:aop="http://www.springframework.org/schema/aop"
+           xsi:schemaLocation="http://www.springframework.org/schema/beans
+                http://www.springframework.org/schema/beans/spring-beans.xsd
+                http://www.springframework.org/schema/context
+                http://www.springframework.org/schema/context/spring-context-4.1.xsd http://www.springframework.org/schema/aop http://www.springframework.org/schema/aop/spring-aop.xsd">
+           <context:component-scan base-package="com.AOPTest"/>
+           <context:annotation-config/>
+
+           <bean id = "executionTimeLoggingSpringAop" class = "com.AOPTest.ExecutionTimeLoggingSpringAOP"/>
+           <bean id = "secondAOPAspect" class = "com.AOPTest.SecondAOPAspect"/>
+           <aop:config expose-proxy="true">
+              <aop:pointcut id = "executionTimeLoggingPointcut" expression = "execution(public * *(..))"/>
+              <aop:advisor id = "executionTimeLoggingAdvisor" advice-ref = "executionTimeLoggingSpringAop"
+                            pointcut-ref="executionTimeLoggingPointcut"/>
+           </aop:config>
+            <aop:config expose-proxy="true">
+                <aop:pointcut id="secondAOPAspectPointcut" expression="execution(public * *(..))"/>
+                <aop:advisor id = "secondAOPAspectAdvisor" advice-ref = "secondAOPAspect"
+                             pointcut-ref="secondAOPAspectPointcut"/>
+            </aop:config>
+    </beans>
+```
+```java
+	//切面类1
+    public class ExecutionTimeLoggingSpringAOP implements MethodBeforeAdvice, AfterReturningAdvice, Ordered {
+        @Override
+        public void before(Method method, Object[] objects, Object o) throws Throwable {
+            System.out.println("ExecutionTimeLoggingSpringAOP前置通知");
+        }
+
+        @Override
+        public void afterReturning(Object returnValue, Method method, Object[] args, Object target) throws Throwable {
+            System.out.println("ExecutionTimeLoggingSpringAOP后置通知");
+        }
+
+        //返回值越小优先级越高
+        @Override
+        public int getOrder() {
+            return 1;
+        }
+    }
+    //切面类2
+    public class SecondAOPAspect implements MethodBeforeAdvice, AfterReturningAdvice, Ordered {
+        @Override
+        public void afterReturning(Object o, Method method, Object[] objects, Object o1) throws Throwable {
+            System.out.println("SecondAOPAspect后置通知");
+        }
+
+        @Override
+        public void before(Method method, Object[] objects, Object o) throws Throwable {
+            System.out.println("SecondAOPAspect前置通知");
+        }
+
+        @Override
+        public int getOrder() {
+            return 0;
+        }
+    }
+    @Component
+    public class MyBean implements MyBeanInterface {
+        @Override
+        public void sayHello() {
+            System.out.println("Hello!");
+        }
+    }
+    public class Main {
+        public static void main(String[] args) {
+            ApplicationContext context = new ClassPathXmlApplicationContext(
+                    "/applicationContext.xml", Main.class
+            );
+            MyBeanInterface myBean = context.getBean(MyBeanInterface.class);
+            myBean.sayHello();
+        }
+    }
+```
+输出结果：  
+&emsp;&emsp;SecondAOPAspect前置通知  
+&emsp;&emsp;ExecutionTimeLoggingSpringAOP前置通知  
+&emsp;&emsp;Hello!  
+&emsp;&emsp;ExecutionTimeLoggingSpringAOP后置通知  
+&emsp;&emsp;SecondAOPAspect后置通知  
+
+(3)一个方法被多个切面增强，这个方法所在的类是如何被Spring代理的？？？  
+&emsp;&emsp;未完待续。。  
+    
+
+
+
 
