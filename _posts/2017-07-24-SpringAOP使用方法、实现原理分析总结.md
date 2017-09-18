@@ -1,6 +1,6 @@
 ---
 layout:     post
-title:      SpringAOP使用方法-实现原理分析总结
+title:      SpringAOP使用方法、实现原理分析总结
 date:       2017-07-24
 author:     W-M
 header-img: img/post-bg-coffee.jpeg
