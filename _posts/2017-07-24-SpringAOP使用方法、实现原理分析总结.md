@@ -193,11 +193,11 @@ _ _ _
     }
 ```
 &emsp;&emsp;运行此段代码后发现this.toString()方法与AopContext.currentProxy().toString()方法输出相同，但this == 代理对象?输出为false。由于java中 = = 操作符号比较的是两个对象的内存地址，所以执行addUser方法的当前对象与代理对象确实是两个对象，不通过代理对象直接调用本类中的其它方法没有切面效果是可以理解的，上面问题得到解决。  
-&emsp;&emsp;但是toString()方法输出内容相同，两个属于不同类的对象均调用默认的toString()方法，理论上来说结果不可能相同，难道当前对象的toString()方法也被默认代理了，执行AopContext.currentProxy().toString()实际执行的是当前对象的toString()方法? 由于当前类采用的AOP实现方式是JDK动态代理，接下来通过分析Spring动态代理实现机制来解释这个问题。
+&emsp;&emsp;但是toString()方法输出内容相同，两个属于不同类的对象均调用默认的toString()方法，理论上来说结果不可能相同，难道当前对象的toString()方法也被默认代理了，执行AopContext.currentProxy().toString()实际执行的是当前对象的toString()方法? 由于当前类采用的AOP实现方式是JDK动态代理，接下来通过分析JDK动态代理实现机制来解释这个问题。  
 
 - 分析JDK动态代理实现机制  
 
-&emsp;&emsp;先看一个JDK动态代理实现AOP的一个小Demo。
+&emsp;&emsp;先看一个JDK动态代理实现AOP的一个小Demo。  
 ```java
     public interface HelloWorld {
         void sayHello();
