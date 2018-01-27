@@ -100,7 +100,7 @@ _ _ _
 ### **Channel**  
 Java NIO中Channel的一种分类方式是通过判断其是否是SelectableChannel的子类，只有SelectableChannel的子类才可以进行select操作，可以进行Select操作的Channel典型代表有DatagramChannel、SocketChannel和ServerSocketChannel，不能进行Select操作的Channel的典型代表是FileChannel，FileChannel相比于传统的IO流操作文件相比，将操作形式变为了Channel-Buffer方式并增加了几种更为高效的文件操作方式，具体使用可以参考：[Java-NIO相关问题记录](https://wang-michael.github.io/2017/11/29/Java-NIO%E7%9B%B8%E5%85%B3%E9%97%AE%E9%A2%98%E8%AE%B0%E5%BD%95/)   
 
-**问题：**为什么FileChannel不支持select操作呢？  
+**问题：**为什么FileChannel不支持配置非阻塞模式呢？   
 
 接下来主要介绍SelectableChannel的几个子类DatagramChannel、SocketChannel、ServerSocketChannel的使用，其UML图如下：
 <img src="/img/2017-11-29/SelectableChannelImpl.jpg" width="600" height="600" alt="SelectableChannelImpl" />
@@ -526,12 +526,12 @@ socketChannel.setOption(StandardSocketOptions.SO_SNDBUF, BUF_SIZE);
 ```  
 可以设置的选项种类有：SO_SNDBUF、SO_RCVBUF、SO_KEEPALIVE、SO_REUSEADDR、SO_LINGER、TCP_NODELAY、IP_TOS、SO_OOBINLINE。
 
-各个选项具体意义参见：[网络编程相关知识杂记之二(TCP&UDP编程相关)](https://wang-michael.github.io/2017/12/31/%E7%BD%91%E7%BB%9C%E7%BC%96%E7%A8%8B%E7%9B%B8%E5%85%B3%E7%9F%A5%E8%AF%86%E6%9D%82%E8%AE%B0%E4%B9%8B%E4%BA%8C(TCP&UDP%E7%BC%96%E7%A8%8B%E7%9B%B8%E5%85%B3)
+各个选项具体意义参见：[网络编程相关知识杂记之二(TCP&UDP编程相关)](https://wang-michael.github.io/2017/12/31/%E7%BD%91%E7%BB%9C%E7%BC%96%E7%A8%8B%E7%9B%B8%E5%85%B3%E7%9F%A5%E8%AF%86%E6%9D%82%E8%AE%B0%E4%B9%8B%E4%BA%8C(TCP&UDP%E7%BC%96%E7%A8%8B%E7%9B%B8%E5%85%B3))
 
 
 **关联的socket**  
 
-通过SocketChannel获取的与其关联的Socket对象实际是通过适配器设计模式封装的基于SocketChannel实现的Socket，
+通过SocketChannel获取的与其关联的Socket对象实际是通过适配器设计模式封装的基于SocketChannel实现的Socket:
 ```java
 class SocketChannelImpl extends SocketChannel implements SelChImpl {
 
@@ -565,7 +565,7 @@ public class SocketAdaptor extends Socket {
 
 支持在Selector上进行的操作有Connect，Read, Write操作。  
 
-keyFor register isRegistered等方法具体作用及使用方法。  
+keyFor register isRegistered等方法具体作用及使用方法?  
   
 #### **ServerSocketChannel**  
 **open及bind操作**
@@ -732,7 +732,7 @@ public class ClientChannel {
     }
 }
 ```
-需要注意的是，Server端虽然此时执行的是非阻塞的accept操作，但是线程模型没有变，仍然是为每一个到来的连接创建一个新的线程，这样使用并不能提升服务器端处理效率，JDK通过Channel引入的非阻塞读写操作意义显然不在于此。当非阻塞的Channel与Selector结合使用时，在服务器端就可以使用1：N的线程模型，在某些场景下可以显著提升应用性能，Selector具体使用记录在：[网络编程相关知识杂记之二(TCP&UDP编程相关)](https://wang-michael.github.io/2017/12/31/%E7%BD%91%E7%BB%9C%E7%BC%96%E7%A8%8B%E7%9B%B8%E5%85%B3%E7%9F%A5%E8%AF%86%E6%9D%82%E8%AE%B0%E4%B9%8B%E4%BA%8C(TCP&UDP%E7%BC%96%E7%A8%8B%E7%9B%B8%E5%85%B3)   
+需要注意的是，Server端虽然此时执行的是非阻塞的accept操作，但是线程模型没有变，仍然是为每一个到来的连接创建一个新的线程，这样使用并不能提升服务器端处理效率，JDK通过Channel引入的非阻塞读写操作意义显然不在于此。当非阻塞的Channel与Selector结合使用时，在服务器端就可以使用1：N的线程模型，在某些场景下可以显著提升应用性能，Selector具体使用记录在：[Java-NIO编程相关之二(SelectionKey&Selector)](https://wang-michael.github.io/2018/01/25/Java-NIO%E7%BC%96%E7%A8%8B%E7%9B%B8%E5%85%B3%E4%B9%8B%E4%BA%8C(SelectionKey&Selector))   
 
 **问题**：ServerSocketChannel.accept()方法阻塞当前线程等待新连接到来与非阻塞不断轮询是否有新连接到来相比哪个更高效？    
 
