@@ -560,6 +560,15 @@ public class SocketAdaptor extends Socket {
     ...
 }
 ```
+可以通过关联的Socket进行流式IO操作，只不过这种IO操作底层还是使用Channel-Buffer模拟实现的，比如：  
+```java
+SocketChannel sc = SocketChannel.open();
+···
+BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(sc.getInputStream()));
+String s = bufferedReader.readLine();
+···
+```
+通过与Channel关联的Socket进行读写要求Channel必须处于阻塞模式，否则会抛出IllegalBlockingModeException。  
 
 **与关联的Selector相关的操作**  
 
