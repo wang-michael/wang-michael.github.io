@@ -338,12 +338,16 @@ final class WindowsSelectorImpl extends SelectorImpl {
 
     WindowsSelectorImpl(SelectorProvider sp) throws IOException {
         super(sp);
+        //创建PollArrayWrapper对象并设置初始容量为8
         pollWrapper = new PollArrayWrapper(INIT_CAP);
+
+        //创建用来进行wakeUp操作的Pipe，并将其SourceChannel FD交由pollWrapper保存。
         wakeupPipe = Pipe.open();
         wakeupSourceFd = ((SelChImpl)wakeupPipe.source()).getFDVal();
 
         // Disable the Nagle algorithm so that the wakeup is more immediate
         SinkChannelImpl sink = (SinkChannelImpl)wakeupPipe.sink();
+        //禁用nagle算法，使得wakeUp操作更快
         (sink.sc).socket().setTcpNoDelay(true);
         wakeupSinkFd = ((SelChImpl)sink).getFDVal();
 
@@ -434,8 +438,8 @@ class PollArrayWrapper {
 }
 ```
 WindowsSelectorImpl构造函数中主要做了两件事:  
-1. 创建PollArrayWrapper对象并设置初始容量为8，意味着在其中最多可以保存8个Channel对应的fd及其感兴趣的事件。  
-2. 创建一个Pipe，并将pipe的SourceChannel对应的fd也交由PollArrayWrapper管理，这是为了实现Selector上的wakeUp方法，之后会具体介 绍。    
+1. 创建PollArrayWrapper对象并设置初始容量为8，意味着初始情况下在其中最多可以保存8个Channel对应的fd及其感兴趣的事件。  
+2. 创建一个Pipe，并将pipe的SourceChannel对应的fd也交由PollArrayWrapper管理，这是为了实现Selector上的wakeUp方法，之后会具体介绍wakeUp实现方式。    
 
 #### **执行select**  
 select操作是Selector中的重头戏，Selector类与select相关的对外供程序员调用的API有以下几种：  
@@ -539,7 +543,7 @@ final class WindowsSelectorImpl extends SelectorImpl {
     // 代表一个用来进行select操作的帮助线程
     private final class SelectThread extends Thread {
         private final int index; // 线程编号，用来区分管理的是哪些fd，比如0代表管理的是1024-2047
-        final SubSelector subSelector;用来进行select操作的SubSelector对象
+        final SubSelector subSelector;//用来进行select操作的SubSelector对象
         private long lastRun = 0; // last run number
         //用来区分当前帮助线程是否为无用线程的标志
         private volatile boolean zombie;
@@ -565,7 +569,7 @@ final class WindowsSelectorImpl extends SelectorImpl {
                     return;
                 // call poll()
                 try {
-                    每个帮助线程调用自己的subSelector对象进行select操作，检测自己管理的fd上是否有满足条件的就绪操作
+                    // 每个帮助线程调用自己的subSelector对象进行select操作，检测自己管理的fd上是否有满足条件的就绪操作
                     subSelector.poll(index);
                 } catch (IOException e) {
                     // Save this exception and let other threads finish.
@@ -680,21 +684,80 @@ final class WindowsSelectorImpl extends SelectorImpl {
     ...
 }
 ```
-
-为什么要使用帮助线程？  
-wakeUp是怎么唤醒的？怎么唤醒多个帮助线程的？  
-FdMap介绍？SubSelector介绍？SubSelector poll processSelectedKeys processFDSet介绍？  
-selector.close()？
-channel.register()？
-
-
-update操作及SubSelector上select操作介绍：  
+接下来对代码注释中涉及的几个重点内容做进一步的解释。  
+1. **为什么要使用帮助线程？**由于windows下select系统调用可管理的fd的最大数量为1024，当注册到单个Selector上的fd数量超过1024的时候就需要使用另一个线程，也就是所谓的帮助线程进行另一个select系统调用管理超出部分的fd。具体示意图如下：  <img src="/img/2018-1-25/selectHelperThreads.jpg" width="500" height="500" alt="引入帮助线程帮助管理fd示意图" /><center>图3：引入帮助线程帮助管理fd示意图</center>  
+2. **wakeUp是怎么唤醒的？怎么唤醒多个帮助线程的？**根据API文档中所述，如果A线程调用selector.select()方法陷入了阻塞，此时在B线程上调用selector.wakeUp()就可以唤醒阻塞的A线程；如果B线程调用selector.wakeUp()时没有任何线程阻塞在select()方法上，那么下一个调用selector.select()方法的线程不会阻塞，立即返回。在上面对select()源码进行分析的过程中我们也可以看到，对于每一轮select操作，主线程和帮助线程会分别对其管理的fd调用select系统调用监听事件就绪状态，只要有一个线程监听的fd中有事件就绪，就会调用wakeUp()方法唤醒其它所有的线程，这与我们的理解是相符的，下面就来看下wakeUp唤醒阻塞线程的原理：  
 ```java
 final class WindowsSelectorImpl extends SelectorImpl {
 
+    public Selector wakeup() {
+        synchronized (interruptLock) {
+            if (!interruptTriggered) {
+                setWakeupSocket();
+                interruptTriggered = true;
+            }
+        }
+        return this;
+    }
+
+    private void setWakeupSocket() {
+        setWakeupSocket0(wakeupSinkFd);
+    }
+
+    private native void setWakeupSocket0(int wakeupSinkFd);
+
+    ...
+}
+```
+可以看到实际wakeUp方法实际调用的是native的setWakeupSocket0()方法，这个方法做了什么呢？其源码如下：    
+```c
+JNIEXPORT void JNICALL
+Java_sun_nio_ch_WindowsSelectorImpl_setWakeupSocket0(JNIEnv *env, jclass this, jint scoutFd) {
+    /* Write one byte into the pipe */
+    const char byte = 1;
+    send(scoutFd, &byte, 1, 0);
+}
+```
+内容很简单，向pipe中写入了一个字节。为什么向pipe中写入一个字节就可以唤醒阻塞的线程呢？因为我们在创建WindowsSelectorImpl对象时，同时创建了一个pipe，将pipe的sourceFd交由PollArrayWrapper管理，每新开一个帮助线程时，其管理的第一个文件描述符也是pipe的sourceFd(如图3所示)，当使用pipe.sinkFd向pipe中写入一个字节时，所有线程都会检测到pipe。sourceFd上的可读事件就绪，当然就会从阻塞中返回，这就是wakeUp方法的实现原理。  
+将一个阻塞在select操作上的线程从阻塞状态中唤醒有三种方式：调用selector.wakeUp()、调用selector.close()、在阻塞线程上调用Thread.interrupt方法，其实selector.close()与Thread.interrupt()方法原理也是调用wakeUp()方法唤醒阻塞线程。    
+3. **startLock与finishLock的作用？**用来进行主线程与帮助线程中的同步，主线程通过startLock来开启新一轮的select操作，帮助线程完成一轮select操作之后会阻塞在startLock上等待进行下一轮select操作。主线程执行结束之后会阻塞在finishLock上等待所有帮助线程执行结束之后才解除阻塞向下执行。  
+
+#### **更新selected Key**    
+
+selector.close()？
+channel.register()？
+keySet与selector线程安全？
+
+
+对于每个Selector类对象，其内部维持了三个SelectionKey相关的集合：  
+* key set：通过selector.keys()方法获取，保存了注册到当前selector上的所有channel对应的SelectionKey的集合。返回的set是不可更改的，即对此set上进行的add、remove及其衍生操作都会抛出UnsupportedOperationException。当一个Channel注册到Selector上时，其对应的SelectionKey会被隐式的添加到key set集合中。被cancelled的SelectionKey会在select操作中从Selector的key set中隐式移除。      
+* selected-key：通过selectedKeys()方法获取，保存那些至少有一个感兴趣的事件已经就绪的Channel对应的SelectionKey，selected-key set中保存的SelectionKey是key set的子集。selected-key set是不能向其中手动添加数据，即对此set上进行的add及其衍生操作都会抛出UnsupportedOperationException。在select操作执行之后，有事件就绪的SelectionKey会被加入到selected Key集合。可以使用set.remove或者set.iterator.remove将处理过的key从selected key中删除，并且如果不主动删除处理过的SelectionKey，这个Key就会一直存在在selected key set中。  
+* cancelled-key：此集合保存selectionKey被cancel但是其对应的channel还没有从selector上解除注册的SelectionKey的集合，此集合不能被直接获取，通常其是key set的子集。一个SelectionKey被添加到cancelled-key set集合中可能有两种情况：一是对应的channel被关闭，二是在SelectionKey上调用cancel方法，其实本质上只有一种，因为关闭channel时也是调用的SelectionKey上的cancel方法。被cancelled的SelectionKey对应的channel会在下次select操作中从selector中解除注册。      
+
+在一个SelectionKey的cancel方法被调用之后，如果调用时其对应的selector上没有select操作正在进行，那么等到下次select操作时，这个key才会真正的从selector中移除；如果调用时有select操作正在进行，可能在本次、也可能在下一次select操作中将key真正的从selector中移除。  
+
+将一个SelectionKey加入到CanceledSet之后，真正的移除工作做了这几件事情：1、从selector的key-set中移除此key 2、从selector的selected-key set中移除此key 3、从此key对应的channel中保存的SelectionKey数组中移除此key 4、从selector的cancelled-key set中移除此key 5、设置此key为invalid，调用其isValid()返回值为false。  
+
+对于程序员来讲，相比于select操作的内部实现，更为关注的是select操作执行后的结果，通常也就是更新后的selectedKey集合，通过这个集合可以知道哪些channel有事件就绪，进行相应处理操作。下面就来通过源码看一下select操作执行之后具体是如何更新selected-key集合的：     
+```java
+final class WindowsSelectorImpl extends SelectorImpl {
+
+    private long updateCount = 0;    
+
+    protected int doSelect(long timeout) throws IOException {
+        ...    
+        subSelector.poll();//监听管理的fd集合是否有就绪事件发生
+        ...
+        int updated = updateSelectedKeys();//更新selectedKeySet
+        ...
+        return updated;//返回与上次select操作相比selectionKey就绪状态有更新的数量
+    }
+
     private int updateSelectedKeys() {
+        //初始情况下为0，每调用一次updateCount就加一
         updateCount++;
         int numKeysUpdated = 0;
+        //遍历主线程及所有帮助线程中包含的就绪fd，计算出与上次select相比就绪状态发生变化的fd总数
         numKeysUpdated += subSelector.processSelectedKeys(updateCount);
         for (SelectThread t: threads) {
             numKeysUpdated += t.subSelector.processSelectedKeys(updateCount);
@@ -707,9 +770,9 @@ final class WindowsSelectorImpl extends SelectorImpl {
 
     private final class SubSelector {
         private final int pollArrayIndex; // starting index in pollArray to poll
-        // These arrays will hold result of native select().
-        // The first element of each array is the number of selected sockets.
-        // Other elements are file descriptors of selected sockets.
+        // 这三个数组保存了select系统调用返回的结果的集合，是poll0函数中的入参
+        // 调用后三个数组中第一个元素的值代表就绪fd的个数
+        // 第一个元素之外的其它元素代表具体就绪的fd
         private final int[] readFds = new int [MAX_SELECTABLE_FDS + 1];
         private final int[] writeFds = new int [MAX_SELECTABLE_FDS + 1];
         private final int[] exceptFds = new int [MAX_SELECTABLE_FDS + 1];
@@ -737,10 +800,14 @@ final class WindowsSelectorImpl extends SelectorImpl {
                      readFds, writeFds, exceptFds, timeout);
         }
 
+        //poll0返回之后readFds中保存读就绪的fd，writeFds中保存写就绪的fd，exceptFds保存有例外数据就绪的fd
         private native int poll0(long pollAddress, int numfds,
              int[] readFds, int[] writeFds, int[] exceptFds, long timeout);
 
-        private int processSelectedKeys(long updateCount) {
+        private int processSelectedKeys(long updateCount) {         
+            /*先处理可读的fd，之后是可写的fd，之后是有例外数据的fd。
+              如果一个SelectionKey之前就存在于selected-key set中并未被移除，之前就绪为可读可写，本次select操作后仍然可读可写，
+              则 processSelectedKeys()方法处理过程中其fd就绪状态变化为 读写->读->读写就绪，返回numKeysUpdated为1.
             int numKeysUpdated = 0;
             numKeysUpdated += processFDSet(updateCount, readFds,
                                            PollArrayWrapper.POLLIN,
@@ -777,6 +844,18 @@ final class WindowsSelectorImpl extends SelectorImpl {
                     }
                     continue;
                 }
+                /*
+                 fdMap的key值为注册到此selector上channel对应的fd，value值为包装为MapEntry的SelectionKey,具体包装方式如下：
+                  private final static class MapEntry {
+                     SelectionKeyImpl ski;
+                     long updateCount = 0;
+                     long clearedCount = 0;
+                     MapEntry(SelectionKeyImpl ski) {
+                          this.ski = ski;
+                     }
+                  }
+                  这样包装的目的是为了根据native select调用返回的就绪fd能快速找到其对应的SelectionKey
+                */
                 MapEntry me = fdMap.get(desc);
                 // If me is null, the key was deregistered in the previous
                 // processDeregisterQueue.
@@ -794,6 +873,16 @@ final class WindowsSelectorImpl extends SelectorImpl {
                     continue;
                 }
 
+                /*
+                  情况1：channel A 在第一次select操作中监测到读就绪，之后在selected-key set中对此fd不做任何处理，第二次select后没有监
+                        测到此Channel就绪，则这次select操作返回的就绪状态有更新的fd数量中不将此fd记录在内。  
+                  情况2：channel A 在第一次select操作中监测到读就绪，之后在selected-key set中对此fd不做任何处理，第二次select后仍然监
+                        测到此Channel读就绪，与上次select监测到的状态相同，则这次select操作返回的就绪状态有更新的fd不将此fd记录在内。
+                  情况3：channel A 在第一次select操作中监测到读就绪，之后在selected-key set中对此fd不做任何处理，第二次select后监
+                        测到此Channel写就绪，与上次select监测到的状态不同，则这次select操作返回的就绪状态有更新的fd将此fd记录在内。
+                  情况4：channel A 注册对读感兴趣，channel A 在第一次select操作中监测到读就绪，之后在selected-key set中对此fd处理后将
+                        此fd从中删除，第二次监测到channel写就绪，由于此Channel注册时对写就绪不感兴趣，调用前channel A中readyOps为读就绪，调用后channel A readyOps设置为0，这次select操作返回的就绪状态有更新的fd不将此fd记录在内。    
+                */
                 if (selectedKeys.contains(sk)) { // Key in selected set
                     if (me.clearedCount != updateCount) {
                         if (sk.channel.translateAndSetReadyOps(rOps, sk) &&
@@ -810,9 +899,9 @@ final class WindowsSelectorImpl extends SelectorImpl {
                     }
                     me.clearedCount = updateCount;
                 } else { // Key is not in selected set yet
-                    if (me.clearedCount != updateCount) {
-                        sk.channel.translateAndSetReadyOps(rOps, sk);
-                        if ((sk.nioReadyOps() & sk.nioInterestOps()) != 0) {
+                    if (me.clearedCount != updateCount) {//情况4会进入这个if中
+                        sk.channel.translateAndSetReadyOps(rOps, sk);//执行完这一句之后，情况4 readyOps变为0
+                        if ((sk.nioReadyOps() & sk.nioInterestOps()) != 0) {//情况4不能进入这个if中
                             selectedKeys.add(sk);
                             me.updateCount = updateCount;
                             numKeysUpdated++;
@@ -833,295 +922,147 @@ final class WindowsSelectorImpl extends SelectorImpl {
     }
 }
 ```
+**select()调用后返回值(和上次select相比就绪fd数量有更新的数量)的计算方法**：  
 
+1、调用时当前channel对应的selection Key不在selected-key set中，则会清除selection key中之前的就绪信息，判断当前channel的就绪事件与其注册的感兴趣的事件是否有交集，如果有则设置其readyOps为此交集，并使select返回值加1。  
 
+2、调用时当前channel对应的selection Key在selected-key set中，首先记录selection key中保存的旧的就绪信息，之后清除selection key中之前的旧的就绪信息，判断当前channel的就绪事件与其注册的感兴趣的事件是否有交集，如果有则设置其readyOps为此交集；若没有交集，则select返回值不变。之后判断现在的readyOps与之前的readyOps相比是否增加了新的就绪操作(比如由读变为写就绪、或由读就绪变为读写就绪)，如果增加了的话就使select返回值加1，如果没增加新的就绪操作的话(比如原来读就绪，现在仍然为读就绪，或者原来为读写就绪，现在仅为写就绪)返回值不变。**需要注意的一种情况是如果channel之前是读写就绪的，下一次select操作后仍然是读写就绪的，第二次select操作这个channel会不会计入到select返回值的计算中呢？**答案是会的，因为其就绪操作在源代码WindowsSelectorImpl内部类SubSelector.processSelectedKeys()中的变化过程为读写就绪->读就绪->读写就绪，由读就绪变为读写就绪的过程中认为增加了新的就绪操作，所以返回值会加1。   
 
+JDK官方API文档中关于select()方法有这样一段话让我感觉很迷惑：         
+<img src="/img/2018-1-25/JDKAPISelect.jpg" width="800" height="800" alt="JDK API select操作相关介绍" />
+<center>图4：JDK API select操作相关介绍</center>  
 
-
-
-WindowsSelectorImpl类成员变量FdMap对应的内部类实现及其作用：    
+按照我的理解，这种说法的意思是对于之前已经保存在selected-key set中的SelectionKey，在本次select操作中SelectionKey之前含有的就绪信息会被保留，新的就绪信息会在原有基础上增加，这与我上面所说的select()返回值计算中第2点是矛盾的。按照这种理解方式，如果一个SocketChannel之前select操作中监测到读写就绪，之后在selected-key set中保留其对应的SelectionKey，下一次select操作中此SocketChannel仅仅写就绪，但是我们通过SelectionKey获得的Channel的就绪信息还会是读写就绪。实际并非如此，第二次select操作会更新就绪信息由读写就绪变为写就绪。测试Demo如下：  
 ```java
-final class WindowsSelectorImpl extends SelectorImpl {
+public class SelectorServer {
 
-    private final FdMap fdMap = new FdMap();
+    private static final String SERVERIP = "localhost";
+    private static final int PORT = 8000;
+    private static Selector selector;
 
-    // Maps file descriptors to their indices in  pollArray
-    private final static class FdMap extends HashMap<Integer, MapEntry> {
-        static final long serialVersionUID = 0L;
-        private MapEntry get(int desc) {
-            return get(new Integer(desc));
-        }
-        private MapEntry put(SelectionKeyImpl ski) {
-            return put(new Integer(ski.channel.getFDVal()), new MapEntry(ski));
-        }
-        private MapEntry remove(SelectionKeyImpl ski) {
-            Integer fd = new Integer(ski.channel.getFDVal());
-            MapEntry x = get(fd);
-            if ((x != null) && (x.ski.channel == ski.channel))
-                return remove(fd);
-            return null;
+    public static void selectorCommonUseStyle() throws IOException, InterruptedException {
+        selector = Selector.open();
+        ServerSocketChannel channel = ServerSocketChannel.open();
+        channel.configureBlocking(false);
+        channel.bind(new InetSocketAddress(SERVERIP, PORT));
+        channel.register(selector, SelectionKey.OP_ACCEPT);
+
+        while(true) {
+            System.out.println("准备select");            
+            int readyChannels = selector.select();
+            System.out.println("readyChannels: " + readyChannels);
+            Set<SelectionKey> selectedKeys = selector.selectedKeys();
+            Iterator<SelectionKey> keyIterator = selectedKeys.iterator();
+
+            while(keyIterator.hasNext()) {
+                SelectionKey key = keyIterator.next();
+                if(key.isAcceptable()) {
+                    System.out.println(key.channel() + "acceptable!");
+                    SocketChannel socketChannel = ((ServerSocketChannel) key.channel()).accept();
+                    socketChannel.configureBlocking(false);
+                    //socketChannel对应的SelectionKey一旦被加入selected-key set，就不会移除
+                    socketChannel.register(selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE);
+                    keyIterator.remove();
+                }
+                if (key.isConnectable()) {                    
+                    System.out.println(key.channel() + "isConnectable!");
+                }
+                if (key.isReadable()) {                    
+                    System.out.println(key.channel() + "isReadable");
+                    ByteBuffer src = ByteBuffer.allocate(1024);
+                    ((SocketChannel) key.channel()).read(src);
+                    src.flip();
+                    byte[] temp = new byte[1024];
+                    src.get(temp, 0, src.limit());
+                    System.out.println(new String(temp));
+                }
+                if (key.isWritable()) {                   
+                    System.out.println(key.channel() + "isWritable");
+                }
+            }
+            Thread.sleep(5000);
+            System.out.println("-----------------------------");
         }
     }
 
-    // class for fdMap entries
-    private final static class MapEntry {
-        SelectionKeyImpl ski;
-        long updateCount = 0;
-        long clearedCount = 0;
-        MapEntry(SelectionKeyImpl ski) {
-            this.ski = ski;
-        }
+    public static void main(String[] args) throws IOException, InterruptedException {
+        selectorCommonUseStyle();
     }
 }
-```
-WindowsSelectorImpl类成员变量StartLock对应的内部类实现及其作用：  
-```java
-final class WindowsSelectorImpl extends SelectorImpl {
 
-    // Helper threads wait on this lock for the next poll.
-    private final StartLock startLock = new StartLock();
+public class SocketChannelClient {
 
-    private final class StartLock {
-        // A variable which distinguishes the current run of doSelect from the
-        // previous one. Incrementing runsCounter and notifying threads will
-        // trigger another round of poll.
-        private long runsCounter;
-       // Triggers threads, waiting on this lock to start polling.
-        private synchronized void startThreads() {
-            runsCounter++; // next run
-            notifyAll(); // wake up threads.
+    private static final String SERVERIP = "localhost";
+    private static final int PORT = 8000;
+
+    public static void main(String[] args) throws IOException, InterruptedException {
+        SocketChannel socketChannel = SocketChannel.open();
+        socketChannel.connect(new InetSocketAddress(InetAddress.getByName(SERVERIP), PORT));
+        socketChannel.configureBlocking(false);
+
+        ByteBuffer src = ByteBuffer.allocate(1024);
+        byte[] dst = new byte[1024];
+
+        src.put("ping".getBytes());
+        src.flip();//写模式切换到读模式
+
+        Thread.sleep(11000);
+        while (src.position() < src.limit()) {
+            socketChannel.write(src);
         }
-        // This function is called by a helper thread to wait for the
-        // next round of poll(). It also checks, if this thread became
-        // redundant. If yes, it returns true, notifying the thread
-        // that it should exit.
-        private synchronized boolean waitForStart(SelectThread thread) {
-            while (true) {
-                while (runsCounter == thread.lastRun) {
-                    try {
-                        startLock.wait();
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                    }
-                }
-                if (thread.isZombie()) { // redundant thread
-                    return true; // will cause run() to exit.
-                } else {
-                    thread.lastRun = runsCounter; // update lastRun
-                    return false; //   will cause run() to poll.
-                }
+
+        /*加上这段代码会有连续两次的readyChannels为1，SocketChannel可读可写的输出
+        Thread.sleep(6000);
+        src.clear();
+        src.put("ping".getBytes());
+        src.flip();//写模式切换到读模式
+        while (src.position() < src.limit()) {
+            socketChannel.write(src);
+        }
+        */
+
+        int num;
+        src.clear();//读模式切换到写模式
+        while ((num = socketChannel.read(src)) != -1) {
+            if (num > 0) {
+                src.flip();
+                src.get(dst, 0, src.limit());
+                System.out.println("收到回复:" + new String(dst));
             }
         }
+
     }
 }
+
+SelectorServer输出结果如下：  
+准备select
+readyChannels: 1
+sun.nio.ch.ServerSocketChannelImpl[/127.0.0.1:8000]acceptable!
+-----------------------------
+准备select
+readyChannels: 1
+java.nio.channels.SocketChannel[connected local=/127.0.0.1:8000 remote=/127.0.0.1:1041]isWritable
+-----------------------------
+准备select
+readyChannels: 0
+java.nio.channels.SocketChannel[connected local=/127.0.0.1:8000 remote=/127.0.0.1:1041]isWritable
+-----------------------------
+准备select
+readyChannels: 1
+java.nio.channels.SocketChannel[connected local=/127.0.0.1:8000 remote=/127.0.0.1:1041]isReadable
+ping                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            
+java.nio.channels.SocketChannel[connected local=/127.0.0.1:8000 remote=/127.0.0.1:1041]isWritable
+-----------------------------
+准备select
+readyChannels: 0
+java.nio.channels.SocketChannel[connected local=/127.0.0.1:8000 remote=/127.0.0.1:1041]isWritable
+-----------------------------
 ```
-WindowsSelectorImpl类成员变量FinishLock对应的内部类实现及其作用：  
-```java
-final class WindowsSelectorImpl extends SelectorImpl {
+由SelectorServer输出的结果可以看出注册在selector上的SocketChannel对应的SelectionKey虽然一直在selected-key set中，但其就绪状态经历了写就绪->读写就绪->写就绪的变化，并且由于由读写就绪切换到写就绪的变化过程中每个状态相比于上一个状态并没有产生新的就绪操作，所以readyChannels数量并没有增加。  
 
-    // Main thread waits on this lock, until all helper threads are done
-    // with poll().
-    private final FinishLock finishLock = new FinishLock();
+**使用SelectionKey interestOps(int ops)方法更改注册到selector上的感兴趣事件何时生效？**
 
-    private final class FinishLock  {
-        // Number of helper threads, that did not finish yet.
-        private int threadsToFinish;
-
-        // IOException which occured during the last run.
-        IOException exception = null;
-
-        // Called before polling.
-        private void reset() {
-            threadsToFinish = threads.size(); // helper threads
-        }
-
-        // Each helper thread invokes this function on finishLock, when
-        // the thread is done with poll().
-        private synchronized void threadFinished() {
-            if (threadsToFinish == threads.size()) { // finished poll() first
-                // if finished first, wakeup others
-                wakeup();
-            }
-            threadsToFinish--;
-            if (threadsToFinish == 0) // all helper threads finished poll().
-                notify();             // notify the main thread
-        }
-
-        // The main thread invokes this function on finishLock to wait
-        // for helper threads to finish poll().
-        private synchronized void waitForHelperThreads() {
-            if (threadsToFinish == threads.size()) {
-                // no helper threads finished yet. Wakeup them up.
-                wakeup();
-            }
-            while (threadsToFinish != 0) {
-                try {
-                    finishLock.wait();
-                } catch (InterruptedException e) {
-                    // Interrupted - set interrupted state.
-                    Thread.currentThread().interrupt();
-                }
-            }
-        }
-
-        // sets IOException for this run
-        private synchronized void setException(IOException e) {
-            exception = e;
-        }
-
-        // Checks if there was any exception during the last run.
-        // If yes, throws it
-        private void checkForException() throws IOException {
-            if (exception == null)
-                return;
-            StringBuffer message =  new StringBuffer("An exception occured" +
-                                       " during the execution of select(): \n");
-            message.append(exception);
-            message.append('\n');
-            exception = null;
-            throw new IOException(message.toString());
-        }
-    }
-}
-```
-WindowsSelectorImpl类成员变量SubSelector对应的内部类实现及其作用：
-```java
-final class WindowsSelectorImpl extends SelectorImpl {
-
-    private final SubSelector subSelector = new SubSelector();
-
-    private final class SubSelector {
-        private final int pollArrayIndex; // starting index in pollArray to poll
-        // These arrays will hold result of native select().
-        // The first element of each array is the number of selected sockets.
-        // Other elements are file descriptors of selected sockets.
-        private final int[] readFds = new int [MAX_SELECTABLE_FDS + 1];
-        private final int[] writeFds = new int [MAX_SELECTABLE_FDS + 1];
-        private final int[] exceptFds = new int [MAX_SELECTABLE_FDS + 1];
-
-        private SubSelector() {
-            this.pollArrayIndex = 0; // main thread
-        }
-
-        private SubSelector(int threadIndex) { // helper threads
-            this.pollArrayIndex = (threadIndex + 1) * MAX_SELECTABLE_FDS;
-        }
-
-        private int poll() throws IOException{ // poll for the main thread
-            return poll0(pollWrapper.pollArrayAddress,
-                         Math.min(totalChannels, MAX_SELECTABLE_FDS),
-                         readFds, writeFds, exceptFds, timeout);
-        }
-
-        private int poll(int index) throws IOException {
-            // poll for helper threads
-            return  poll0(pollWrapper.pollArrayAddress +
-                     (pollArrayIndex * PollArrayWrapper.SIZE_POLLFD),
-                     Math.min(MAX_SELECTABLE_FDS,
-                             totalChannels - (index + 1) * MAX_SELECTABLE_FDS),
-                     readFds, writeFds, exceptFds, timeout);
-        }
-
-        private native int poll0(long pollAddress, int numfds,
-             int[] readFds, int[] writeFds, int[] exceptFds, long timeout);
-
-        private int processSelectedKeys(long updateCount) {
-            int numKeysUpdated = 0;
-            numKeysUpdated += processFDSet(updateCount, readFds,
-                                           PollArrayWrapper.POLLIN,
-                                           false);
-            numKeysUpdated += processFDSet(updateCount, writeFds,
-                                           PollArrayWrapper.POLLCONN |
-                                           PollArrayWrapper.POLLOUT,
-                                           false);
-            numKeysUpdated += processFDSet(updateCount, exceptFds,
-                                           PollArrayWrapper.POLLIN |
-                                           PollArrayWrapper.POLLCONN |
-                                           PollArrayWrapper.POLLOUT,
-                                           true);
-            return numKeysUpdated;
-        }
-
-        /**
-         * Note, clearedCount is used to determine if the readyOps have
-         * been reset in this select operation. updateCount is used to
-         * tell if a key has been counted as updated in this select
-         * operation.
-         *
-         * me.updateCount <= me.clearedCount <= updateCount
-         */
-        private int processFDSet(long updateCount, int[] fds, int rOps,
-                                 boolean isExceptFds)
-        {
-            int numKeysUpdated = 0;
-            for (int i = 1; i <= fds[0]; i++) {
-                int desc = fds[i];
-                if (desc == wakeupSourceFd) {
-                    synchronized (interruptLock) {
-                        interruptTriggered = true;
-                    }
-                    continue;
-                }
-                MapEntry me = fdMap.get(desc);
-                // If me is null, the key was deregistered in the previous
-                // processDeregisterQueue.
-                if (me == null)
-                    continue;
-                SelectionKeyImpl sk = me.ski;
-
-                // The descriptor may be in the exceptfds set because there is
-                // OOB data queued to the socket. If there is OOB data then it
-                // is discarded and the key is not added to the selected set.
-                if (isExceptFds &&
-                    (sk.channel() instanceof SocketChannelImpl) &&
-                    discardUrgentData(desc))
-                {
-                    continue;
-                }
-
-                if (selectedKeys.contains(sk)) { // Key in selected set
-                    if (me.clearedCount != updateCount) {
-                        if (sk.channel.translateAndSetReadyOps(rOps, sk) &&
-                            (me.updateCount != updateCount)) {
-                            me.updateCount = updateCount;
-                            numKeysUpdated++;
-                        }
-                    } else { // The readyOps have been set; now add
-                        if (sk.channel.translateAndUpdateReadyOps(rOps, sk) &&
-                            (me.updateCount != updateCount)) {
-                            me.updateCount = updateCount;
-                            numKeysUpdated++;
-                        }
-                    }
-                    me.clearedCount = updateCount;
-                } else { // Key is not in selected set yet
-                    if (me.clearedCount != updateCount) {
-                        sk.channel.translateAndSetReadyOps(rOps, sk);
-                        if ((sk.nioReadyOps() & sk.nioInterestOps()) != 0) {
-                            selectedKeys.add(sk);
-                            me.updateCount = updateCount;
-                            numKeysUpdated++;
-                        }
-                    } else { // The readyOps have been set; now add
-                        sk.channel.translateAndUpdateReadyOps(rOps, sk);
-                        if ((sk.nioReadyOps() & sk.nioInterestOps()) != 0) {
-                            selectedKeys.add(sk);
-                            me.updateCount = updateCount;
-                            numKeysUpdated++;
-                        }
-                    }
-                    me.clearedCount = updateCount;
-                }
-            }
-            return numKeysUpdated;
-        }
-    }
-}
-```
-
-
-#### **唤醒阻塞的select**  
-abstract Selector wakeup():
+如果调用interestOps(int ops)方法时有select操作正在运行，本次select操作中不一定能检测到感兴趣事件的改动，但下次select操作一定可以检测到。  
 
 #### **关闭selector**  
 abstract void close():
