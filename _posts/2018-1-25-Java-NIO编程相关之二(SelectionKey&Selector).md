@@ -6,7 +6,8 @@ author:     W-M
 header-img: img/post-bg-coffee.jpeg
 catalog: true
 tags:
-    - Java基础
+    - Java基础 
+    - JDK源码阅读
 ---
 
 >本文主要记录了个人在学习NIO相关知识时一些思考过程，主要用于备忘，错误难免，敬请指出！
@@ -20,14 +21,10 @@ _ _ _
 ### **Selector**  
 **Select模型的意义并不在于消除阻塞，而是在于消除阻塞之后支持的多路复用机制，非阻塞读写很容易实现，但没有Select模型，如何实现类似Selector的1：N线程模型高效的处理非阻塞读写就会非常复杂。**   
 
-**问题**：为什么select要求channel工作在非阻塞模式下呢？
-Selector内部原理实际是在做一个对所注册的channel的轮询访问，不断的轮询(目前就这一个算法)，一旦轮询到一个channel有所注册的事情发生，比如数据来了，他就会站起来报告，交出一把钥匙，让我们通过这把钥匙来读取这个channel的内容。轮询多个Channel的过程中要求不能阻塞在对某个Channel的询问上，所以要求注册到Selector上的Channel都工作在非阻塞模式下？  
+**问题**：为什么Java Selector要求channel工作在非阻塞模式下呢？  
+我的理解：os内部select系统调用首先会对要读写的设备进行轮询，若轮询时没有设备可读写，则调用select的进程进入睡眠状态(并不会一直轮询)，当有设备变得可读写时，相应设备会唤醒睡眠进程，从而继续往下执行。这就实现了select的当有一个文件描述符可操作时就立即唤醒执行的基本原理。Java Selector本质上还是基于底层os的select系统调用实现的，在select轮询监测设备的时候不能陷入阻塞，所以Java Selector要求Channel工作在非阻塞模式下。   
 
-socketChannel可以注册connect,read,write;  
-serverSocketChannel只能注册对accept事件感兴趣；  
-
-非阻塞读写：内核中没有数据准备好，立即返回，不会等待数据准备好之后才返回。  
-**问题**:什么情况下connect、Read、write在select过程才被认为是准备好呢？  
+os中select()内部实现管理可参考：[Linux:select()详解和实现原理](http://www.cnblogs.com/sky-heaven/p/7205491.html)    
 
 #### **为什么要使用Selector模式？**  
 传统的1:1线程模型对于每个到来的客户端都需要生成一个新的线程进行处理，生成多个线程及在线程之间切换的开销是不容忽视的，有些应用场景下使用1:1线程模型是不合适的，比如服务器需要同时支持大量的长期连接，比如说10000个连接以上，不过各个客户端并不会很频繁的发送太多的数据，想象下面这种场景：  
@@ -455,7 +452,7 @@ select操作是Selector中的重头戏，Selector类与select相关的对外供�
     //select操作过后更新的有事件就绪的SelectionKey的集合
     abstract Set<SelectionKey> selectedKeys():
 ```
-为了更好的使用Selector提供给我们的API，最好理解其内部实现方式；下面就来看下select()方法的内部实现，具体分析见注释：  
+对于select方式的底层实现Java实际上是通过调用native方法进而调用底层系统调用来实现的，比如Windows上使用select方式，linux上调用epoll系统调用。为了更好的使用Selector提供给我们的API，最好理解其内部实现方式；下面就以windows下JDK1.8为例来看下select()方法的内部实现，具体分析见注释：  
 ```java
 abstract class SelectorImpl extends AbstractSelector {
 
@@ -486,6 +483,7 @@ final class WindowsSelectorImpl extends SelectorImpl {
         //进行select操作之前先删除无效的SelectionKey
         processDeregisterQueue();
         if (interruptTriggered) {
+            //如果wakeUp被调用过，则读出pipe中用来wakeUp的数据，本次select操作立即返回
             resetWakeupSocket();
             return 0;
         }
@@ -718,17 +716,11 @@ Java_sun_nio_ch_WindowsSelectorImpl_setWakeupSocket0(JNIEnv *env, jclass this, j
     send(scoutFd, &byte, 1, 0);
 }
 ```
-内容很简单，向pipe中写入了一个字节。为什么向pipe中写入一个字节就可以唤醒阻塞的线程呢？因为我们在创建WindowsSelectorImpl对象时，同时创建了一个pipe，将pipe的sourceFd交由PollArrayWrapper管理，每新开一个帮助线程时，其管理的第一个文件描述符也是pipe的sourceFd(如图3所示)，当使用pipe.sinkFd向pipe中写入一个字节时，所有线程都会检测到pipe。sourceFd上的可读事件就绪，当然就会从阻塞中返回，这就是wakeUp方法的实现原理。  
-将一个阻塞在select操作上的线程从阻塞状态中唤醒有三种方式：调用selector.wakeUp()、调用selector.close()、在阻塞线程上调用Thread.interrupt方法，其实selector.close()与Thread.interrupt()方法原理也是调用wakeUp()方法唤醒阻塞线程。    
+内容很简单，向pipe中写入了一个字节。为什么向pipe中写入一个字节就可以唤醒阻塞的线程呢？因为我们在创建WindowsSelectorImpl对象时，同时创建了一个pipe，将pipe的sourceFd交由PollArrayWrapper管理，每新开一个帮助线程时，其管理的第一个文件描述符也是pipe的sourceFd(如图3所示)，当使用pipe.sinkFd向pipe中写入一个字节时，所有线程都会检测到pipe。sourceFd上的可读事件就绪，当然就会从阻塞中返回，这就是wakeUp方法的实现原理。**将一个阻塞在select操作上的线程从阻塞状态中唤醒有三种方式**：调用selector.wakeUp()、调用selector.close()、在阻塞线程上调用Thread.interrupt方法，其实selector.close()与Thread.interrupt()方法原理也是调用wakeUp()方法唤醒阻塞线程。多个线程同时调用一个selector上的select()方法陷入阻塞，只有一个线程是由于调用native select方法等待感事件就绪陷入阻塞，其余线程是由于要获取的锁被占用而陷入阻塞。wakeUp()方法唤醒的是由于调用native select方法陷入阻塞的线程。  
+
 3. **startLock与finishLock的作用？**用来进行主线程与帮助线程中的同步，主线程通过startLock来开启新一轮的select操作，帮助线程完成一轮select操作之后会阻塞在startLock上等待进行下一轮select操作。主线程执行结束之后会阻塞在finishLock上等待所有帮助线程执行结束之后才解除阻塞向下执行。  
 
 #### **更新selected Key**    
-
-selector.close()？
-channel.register()？
-keySet与selector线程安全？
-
-
 对于每个Selector类对象，其内部维持了三个SelectionKey相关的集合：  
 * key set：通过selector.keys()方法获取，保存了注册到当前selector上的所有channel对应的SelectionKey的集合。返回的set是不可更改的，即对此set上进行的add、remove及其衍生操作都会抛出UnsupportedOperationException。当一个Channel注册到Selector上时，其对应的SelectionKey会被隐式的添加到key set集合中。被cancelled的SelectionKey会在select操作中从Selector的key set中隐式移除。      
 * selected-key：通过selectedKeys()方法获取，保存那些至少有一个感兴趣的事件已经就绪的Channel对应的SelectionKey，selected-key set中保存的SelectionKey是key set的子集。selected-key set是不能向其中手动添加数据，即对此set上进行的add及其衍生操作都会抛出UnsupportedOperationException。在select操作执行之后，有事件就绪的SelectionKey会被加入到selected Key集合。可以使用set.remove或者set.iterator.remove将处理过的key从selected key中删除，并且如果不主动删除处理过的SelectionKey，这个Key就会一直存在在selected key set中。  
@@ -932,7 +924,7 @@ JDK官方API文档中关于select()方法有这样一段话让我感觉很迷惑
 <img src="/img/2018-1-25/JDKAPISelect.jpg" width="800" height="800" alt="JDK API select操作相关介绍" />
 <center>图4：JDK API select操作相关介绍</center>  
 
-按照我的理解，这种说法的意思是对于之前已经保存在selected-key set中的SelectionKey，在本次select操作中SelectionKey之前含有的就绪信息会被保留，新的就绪信息会在原有基础上增加，这与我上面所说的select()返回值计算中第2点是矛盾的。按照这种理解方式，如果一个SocketChannel之前select操作中监测到读写就绪，之后在selected-key set中保留其对应的SelectionKey，下一次select操作中此SocketChannel仅仅写就绪，但是我们通过SelectionKey获得的Channel的就绪信息还会是读写就绪。实际并非如此，第二次select操作会更新就绪信息由读写就绪变为写就绪。测试Demo如下：  
+按照我的理解，这种说法的意思是对于之前已经保存在selected-key set中的SelectionKey，在本次select操作中SelectionKey之前含有的就绪信息会被保留，新的就绪信息会在原有基础上增加，这与我上面所说的select()返回值计算中第2点是矛盾的。按照这种理解方式，如果一个SocketChannel之前select操作中监测到读写就绪，之后在selected-key set中保留其对应的SelectionKey，下一次select操作中此SocketChannel仅仅写就绪，但是我们通过SelectionKey获得的Channel的就绪信息还会是读写就绪。实际是不是这样呢？经我测试这种理解方式是不对的，第二次select操作会更新就绪信息由读写就绪变为写就绪。测试Demo如下：    
 ```java
 public class SelectorServer {
 
@@ -1034,6 +1026,7 @@ public class SocketChannelClient {
     }
 }
 
+/*
 SelectorServer输出结果如下：  
 准备select
 readyChannels: 1
@@ -1057,6 +1050,7 @@ java.nio.channels.SocketChannel[connected local=/127.0.0.1:8000 remote=/127.0.0.
 readyChannels: 0
 java.nio.channels.SocketChannel[connected local=/127.0.0.1:8000 remote=/127.0.0.1:1041]isWritable
 -----------------------------
+*/
 ```
 由SelectorServer输出的结果可以看出注册在selector上的SocketChannel对应的SelectionKey虽然一直在selected-key set中，但其就绪状态经历了写就绪->读写就绪->写就绪的变化，并且由于由读写就绪切换到写就绪的变化过程中每个状态相比于上一个状态并没有产生新的就绪操作，所以readyChannels数量并没有增加。  
 
@@ -1064,7 +1058,196 @@ java.nio.channels.SocketChannel[connected local=/127.0.0.1:8000 remote=/127.0.0.
 
 如果调用interestOps(int ops)方法时有select操作正在运行，本次select操作中不一定能检测到感兴趣事件的改动，但下次select操作一定可以检测到。  
 
-#### **关闭selector**  
-abstract void close():
+**在Selected-key Set中的SelectionKey对应的Channel不一定是真正有就绪操作发生的。**这可能有以下几种情况：
+* 有可能前一次select操作中监测到某个Channel有感兴趣的事件就绪，加入到selected-key set之后不对其做任何处理，第二次select操作之后实际上此Channel没有任何事件就绪，但其仍在selected-key set中保存，并且其中保存的就绪信息仍是第一次select时储存的就绪信息。  
+* 在一次select过程中，某个SelectionKey被加入到了selected-key set中，但是在select过程中此selectionKey上的cancel方法已经被调用，这个key实际是无效的。
+* 在一次select过程中，某个SelectionKey被加入到了selected-key set中，但是在select过程中此selectionKey对应的Channel被关闭(实际也是调用了selectionKey上的cancel方法)，这个虽然在selected-key set中，但实际是无效的。
 
-对于select方式的底层实现Java实际上是通过调用native方法进而调用底层系统调用来实现的，比如linux上调用epoll系统调用。  
+#### **关闭Selector**    
+首先看下selector.close()在源代码中的执行流程：  
+```java
+public abstract class Selector implements Closeable {
+
+    public abstract void close() throws IOException;
+
+}
+
+public abstract class AbstractSelector extends Selector {
+
+    public final void close() throws IOException {
+        //如果之前close()方法已经被调用过，则直接返回
+        boolean open = selectorOpen.getAndSet(false);
+        if (!open)
+            return;
+        implCloseSelector();
+    }
+
+    protected abstract void implCloseSelector() throws IOException;
+    ...
+}
+
+public abstract class SelectorImpl extends AbstractSelector {
+
+    public void implCloseSelector() throws IOException {
+        //如果有线程正阻塞在对selector方法的调用上，则会被wakeUp()方法唤醒
+        this.wakeup();
+        synchronized(this) {
+            Set var2 = this.publicKeys;
+            synchronized(this.publicKeys) {
+                Set var3 = this.publicSelectedKeys;
+                synchronized(this.publicSelectedKeys) {
+                    this.implClose();
+                }
+            }
+
+        }
+    }
+
+    protected abstract void implClose() throws IOException;
+    ...
+}
+
+final class WindowsSelectorImpl extends SelectorImpl {
+    //进行资源清理操作
+    protected void implClose() throws IOException {
+        Object var1 = this.closeLock;
+        synchronized(this.closeLock) {
+            if(this.channelArray != null && this.pollWrapper != null) {
+                Object i = this.interruptLock;
+                synchronized(this.interruptLock) {
+                    this.interruptTriggered = true;
+                }
+
+                this.wakeupPipe.sink().close();
+                this.wakeupPipe.source().close();
+
+                //解除所有注册到当前selector上的Channel
+                for(int var7 = 1; var7 < this.totalChannels; ++var7) {
+                    if(var7 % 1024 != 0) {
+                        this.deregister(this.channelArray[var7]);
+                        SelectableChannel t = this.channelArray[var7].channel();
+                        if(!t.isOpen() && !t.isRegistered()) {
+                            ((SelChImpl)t).kill();
+                        }
+                    }
+                }
+
+                //释放pollWrapper所占有的堆外内存空间
+                this.pollWrapper.free();
+                this.pollWrapper = null;
+                this.selectedKeys = null;
+                this.channelArray = null;
+                //退出所有的帮助线程
+                Iterator var8 = this.threads.iterator();
+
+                while(var8.hasNext()) {
+                    WindowsSelectorImpl.SelectThread var9 = (WindowsSelectorImpl.SelectThread)var8.next();
+                    var9.makeZombie();
+                }
+
+                this.startLock.startThreads();
+            }
+
+        }
+    }
+    ...
+}
+```
+可以看出，close()方法所做的主要工作有两部分，一是唤醒阻塞在Selector.select()方法上的所有线程，二是进行必要的资源清理工作。资源清理时close()方法带来的边际效应是将注册到其上的SelectionKey从对应的Channel中删除。    
+
+一个Selector被关闭后，除了wakeUp()和close()方法之外的任何其他方法调用都会抛出ClosedSelectorException。实际上selector关闭后调用wakeUp方法和close方法也不会有任何作用。  
+
+#### **Selector线程安全问题**    
+Selector本身应用于多线程情况下是线程安全的，但是通过其获取的Set本身并不是线程安全的。比如多线程调用同一个selector上的selectedKeys()方法对获取的set做remove操作，此时就需要注意线程安全问题。  
+
+#### **Channel在Selector上的注册**  
+Channel.register()方法在执行时如果其对应的Selector上的select或close方法正在执行，register方法会阻塞到这两个方法执行完毕之后才能执行。AbstractChannel及其子类注册过程都是下面的代码：      
+```java
+public abstract class AbstractSelectableChannel extends SelectableChannel {
+
+    public final SelectionKey register(Selector sel, int ops, Object att) throws ClosedChannelException {
+        synchronized (regLock) {
+            if (!isOpen())
+                throw new ClosedChannelException();
+            if ((ops & ~validOps()) != 0)
+                throw new IllegalArgumentException();
+            if (blocking)
+                throw new IllegalBlockingModeException();
+            SelectionKey k = findKey(sel);
+            //如果之前注册过本次相当于更改SelectionKey的ops和att属性
+            if (k != null) {
+                k.interestOps(ops);
+                k.attach(att);
+            }
+            if (k == null) {
+                // New registration
+                synchronized (keyLock) {
+                    if (!isOpen())
+                        throw new ClosedChannelException();
+                    //在对应Selector上注册Channel
+                    k = ((AbstractSelector)sel).register(this, ops, att);
+                    //将注册后获得的SelectionKey在Channel中保存一份
+                    addKey(k);
+                }
+            }
+            return k;
+        }
+    }
+    ...
+}
+
+public abstract class SelectorImpl extends AbstractSelector {
+
+    protected final SelectionKey register(AbstractSelectableChannel ch, int ops, Object attachment) {
+        if(!(ch instanceof SelChImpl)) {
+            throw new IllegalSelectorException();
+        } else {
+            SelectionKeyImpl k = new SelectionKeyImpl((SelChImpl)ch, this);
+            k.attach(attachment);
+            Set var5 = this.publicKeys;
+            //需要获得publicKeys上的锁才能继续执行，Selector.select()执行时也要获得publicKeys上的锁
+            synchronized(this.publicKeys) {
+                this.implRegister(k);
+            }
+
+            k.interestOps(ops);
+            return k;
+        }
+    }
+    ...
+}
+
+final class WindowsSelectorImpl extends SelectorImpl {
+
+    //在Selector上的实际注册操作
+    protected void implRegister(SelectionKeyImpl ski) { 
+        Object var2 = this.closeLock;
+        synchronized(this.closeLock) {
+            if(this.pollWrapper == null) {
+                throw new ClosedSelectorException();
+            } else {
+                this.growIfNeeded();
+                this.channelArray[this.totalChannels] = ski;
+                ski.setIndex(this.totalChannels);
+                this.fdMap.put(ski);
+                this.keys.add(ski);
+                this.pollWrapper.addEntry(this.totalChannels, ski);
+                ++this.totalChannels;
+            }
+        }
+    }
+    ...
+}
+```
+对于AbstractSelectableChannel.isRegistered()方法，只要当前Channel注册到了任何一个Selector上，就会返回true。需要注意的是有可能当Channel所有的SelectionKey都被Cancel之后调用此方法仍然返回true，这是因为cancel一个SelectionKey并不会立即解除Selector与Channel之间的注册关系，而是要等到Selector上的下一次select操作进行或者Selector被关闭才会解除。  
+
+最后附上一张Selector工作流程图：  
+<img src="/img/2018-1-25/selectorwork.jpg" width="800" height="800" alt="Selector工作流程图" />
+<center>图5：Selector工作流程图</center>  
+
+参考文章：  
+[《Java 源码分析》：Java NIO 之 Selector(第一部分Selector.open())](http://blog.csdn.net/u010412719/article/details/52809669)  
+[Java NIO Tutorial](http://tutorials.jenkov.com/java-nio/index.html)   
+
+（完）
+

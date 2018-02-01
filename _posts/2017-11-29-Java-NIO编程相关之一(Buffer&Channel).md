@@ -514,9 +514,11 @@ public class IOUtil {
 
 **close操作**   
 
-半关闭：分为shutdownInput()，shutdownOutput()两种，关闭的分别是socketChannel的读操作和写操作。连接一端调用shutdownOutput之后，另一端的read操作会返回-1;连接一端调用shutdownInput关闭输入，另一端的写操作没有感知，正常进行。
+半关闭：分为shutdownInput()，shutdownOutput()两种，关闭的分别是socketChannel的读操作和写操作。连接一端调用shutdownOutput之后，另一端的read操作会返回-1;连接一端调用shutdownInput关闭输入，另一端的写操作没有感知，正常进行。  
     
-全关闭：如果当前有线程阻塞在channel上进行IO操作，关闭时阻塞的IO操作会返回。如果当前SocketChannel关闭时仍注册在某个或多个Selector上，关闭时还需要取消这种注册关系。对于建立了连接的A与B，一端在调用了close方法关闭channel之后，另一端的通过SocketChannel进行的read操作会抛出异常：java.io.IOException: Read failed，另一端的写操作没有感知，数据正常写入。
+全关闭：如果当前有线程阻塞在channel上进行IO操作，关闭时阻塞的IO操作会返回。如果当前SocketChannel关闭时仍注册在某个或多个Selector上，关闭时还需要取消这种注册关系。对于建立了连接的A与B，一端在调用了close方法关闭channel之后，另一端的通过SocketChannel进行的read操作会抛出异常：java.io.IOException: Read failed，另一端的写操作没有感知，数据正常写入。  
+
+Channel关闭的同时还会调用其保存的所有SelectionKey上的cancel方法，解除与对应的Selector的注册关系。  
 
 **设置相关选项**  
 
@@ -526,7 +528,7 @@ socketChannel.setOption(StandardSocketOptions.SO_SNDBUF, BUF_SIZE);
 ```  
 可以设置的选项种类有：SO_SNDBUF、SO_RCVBUF、SO_KEEPALIVE、SO_REUSEADDR、SO_LINGER、TCP_NODELAY、IP_TOS、SO_OOBINLINE。
 
-各个选项具体意义参见：[网络编程相关知识杂记之二(TCP&UDP编程相关)](https://wang-michael.github.io/2017/12/31/%E7%BD%91%E7%BB%9C%E7%BC%96%E7%A8%8B%E7%9B%B8%E5%85%B3%E7%9F%A5%E8%AF%86%E6%9D%82%E8%AE%B0%E4%B9%8B%E4%BA%8C(TCP&UDP%E7%BC%96%E7%A8%8B%E7%9B%B8%E5%85%B3))
+各个选项具体意义参见：[网络编程相关知识杂记之二(TCP&UDP编程相关)](https://wang-michael.github.io/2017/12/31/%E7%BD%91%E7%BB%9C%E7%BC%96%E7%A8%8B%E7%9B%B8%E5%85%B3%E7%9F%A5%E8%AF%86%E6%9D%82%E8%AE%B0%E4%B9%8B%E4%BA%8C(TCP&UDP%E7%BC%96%E7%A8%8B%E7%9B%B8%E5%85%B3))  
 
 
 **关联的socket**  
@@ -573,8 +575,6 @@ String s = bufferedReader.readLine();
 **与关联的Selector相关的操作**  
 
 支持在Selector上进行的操作有Connect，Read, Write操作。  
-
-keyFor register isRegistered等方法具体作用及使用方法?  
   
 #### **ServerSocketChannel**  
 **open及bind操作**
@@ -616,9 +616,7 @@ class ServerSocketChannelImpl extends ServerSocketChannel implements SelChImpl {
 
 **获取关联SelectionKey**  
 
-支持Selector上监听的操作有Accept操作。  
-
-keyFor register isRegistered等方法具体作用及使用方法。   
+支持Selector上监听的操作有Accept操作。   
 
 #### **DatagramChannel**  
 **open与connect操作**  
@@ -648,8 +646,6 @@ int send(ByteBuffer src, SocketAddress target):相比于write方法多了每次�
 **与关联的Selector相关的操作**     
 
 支持Selector上监听的操作有Read、Write操作。  
-
-keyFor register isRegistered等方法具体作用及使用方法。  
 
 #### **Channel的非阻塞使用**    
 下面的Demo中Server端采用非阻塞模式的accept操作，Client端使用非阻塞模式的read及write操作：  
@@ -741,7 +737,7 @@ public class ClientChannel {
     }
 }
 ```
-需要注意的是，Server端虽然此时执行的是非阻塞的accept操作，但是线程模型没有变，仍然是为每一个到来的连接创建一个新的线程，这样使用并不能提升服务器端处理效率，JDK通过Channel引入的非阻塞读写操作意义显然不在于此。当非阻塞的Channel与Selector结合使用时，在服务器端就可以使用1：N的线程模型，在某些场景下可以显著提升应用性能，Selector具体使用记录在：[Java-NIO编程相关之二(SelectionKey&Selector)](https://wang-michael.github.io/2018/01/25/Java-NIO%E7%BC%96%E7%A8%8B%E7%9B%B8%E5%85%B3%E4%B9%8B%E4%BA%8C(SelectionKey&Selector))   
+需要注意的是，Server端虽然此时执行的是非阻塞的accept操作，但是线程模型没有变，仍然是为每一个到来的连接创建一个新的线程，这样使用并不能提升服务器端处理效率，JDK通过Channel引入的非阻塞读写操作意义显然不在于此。自己利用Channel的非阻塞功能实现1：N的线程模型很难实现简单高效，但是当非阻塞的Channel与Java Selector结合使用时，在服务器端就可以使用1：N的线程模型，在某些场景下可以显著提升应用性能，Selector具体使用记录在：[Java-NIO编程相关之二(SelectionKey&Selector)](https://wang-michael.github.io/2018/01/25/Java-NIO%E7%BC%96%E7%A8%8B%E7%9B%B8%E5%85%B3%E4%B9%8B%E4%BA%8C(SelectionKey&Selector))   
 
 **问题**：ServerSocketChannel.accept()方法阻塞当前线程等待新连接到来与非阻塞不断轮询是否有新连接到来相比哪个更高效？    
 
