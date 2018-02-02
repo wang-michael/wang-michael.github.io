@@ -1241,6 +1241,9 @@ final class WindowsSelectorImpl extends SelectorImpl {
 ```
 对于AbstractSelectableChannel.isRegistered()方法，只要当前Channel注册到了任何一个Selector上，就会返回true。需要注意的是有可能当Channel所有的SelectionKey都被Cancel之后调用此方法仍然返回true，这是因为cancel一个SelectionKey并不会立即解除Selector与Channel之间的注册关系，而是要等到Selector上的下一次select操作进行或者Selector被关闭才会解除。  
 
+关于Selector使用更详细的示例可参考：[java-nio-server](https://github.com/wang-michael/java-nio-server)    
+源代码forked by jjenkov，在其基础上做了一些修改，使用Java NIO原生API实现了一个简单的HTTP服务器。  
+
 最后附上一张Selector工作流程图：  
 <img src="/img/2018-1-25/selectorwork.jpg" width="800" height="800" alt="Selector工作流程图" />
 <center>图5：Selector工作流程图</center>  
