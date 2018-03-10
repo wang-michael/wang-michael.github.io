@@ -653,6 +653,7 @@ public class AsyncEventQueueTests {
     LikeHandler中开始异步处理点赞事件带来的影响！
     事件类型：LIKE 事件发起用户ID: 1 被点赞实体类型： 2 被点赞实体ID: 13
 ``` 
+上述基于Redis实现的异步事件处理使用到了Redis的BRPOP命令，Redis单线程模型如何实现的阻塞队列可参考：[Redis阻塞操作实现原理](https://www.jianshu.com/p/xsMzfn)    
 _ _ _ 
 (完)
 
