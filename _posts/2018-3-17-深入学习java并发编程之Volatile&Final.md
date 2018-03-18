@@ -121,7 +121,7 @@ class DCLSingleInstance {
 ```java
 class SingleInstance {
     private static class SingleInstanceHolder {
-        private static final SingleInstance SINGLE_INSTANCE = new SingleInstance();
+        private static SingleInstance SINGLE_INSTANCE = new SingleInstance();
     }
 
     private SingleInstance() {}
