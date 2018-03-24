@@ -42,3 +42,20 @@ windows版本在redis.windows.conf配置文件中存储
 
 ##使用redis缓存数据与在进程中直接使用blockingQueue，list等数据结构缓存数据相比有何好处？  
 feed流推数据使用redis中list缓存每个用户的timeline；推数据存储压力大，拉数据读取压力大
+
+**面试题：**
+Redis中zSet跳跃表问题；
+
+Redis的set的应用场合？
+
+Redis高级特性了解吗？
+
+Redis的pipeline有什么用处？
+
+Redis集群宕机如何处理，怎么样进行数据的迁移；
+
+Redis的集群方案；
+
+Redis原子操作怎么用比较好；
+
+Redis过期策略是怎么实现的呢？

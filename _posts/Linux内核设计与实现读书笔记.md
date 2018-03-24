@@ -41,7 +41,7 @@
 * ctrl + c(SIGINT信号):中断处理程序中直接杀死进程，回收其资源，可忽略；SIGSTOP相当于Ctrl + Z，可以继续恢复到前台执行；
 
 **问题**：只有处于Running状态的线程才占用CPU吗？？？  
-linux系统中大部分进程都处于TASK_INTERRUPTIBLE状态，进程何时会由运行态变为TASK_INTERRUPTIBLE状态呢？何时又会重新切换到就绪运行态呢？  
+linux系统中大部分进程都处于TASK_INTERRUPTIBLE状态，(比如一个C语言serverSocket.accept()的进程就处于TASK_INTERRUPTIBLE状态)；进程何时会由运行态变为TASK_INTERRUPTIBLE状态呢？何时又会重新切换到就绪运行态呢？  
 
 ---
 ###进程调度的几种情况
