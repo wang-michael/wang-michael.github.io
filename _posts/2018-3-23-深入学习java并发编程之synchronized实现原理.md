@@ -921,6 +921,10 @@ void ObjectMonitor::ExitEpilog (Thread * Self, ObjectWaiter * Wakee) {
 }
 ```
 3、被唤醒的线程，继续执行monitor的竞争；需要注意的是**synchronized是非公平锁**，并不是先等待的线程先获得锁。  
+* 公平锁（Fair）：加锁前检查是否有排队等待的线程，优先排队等待的线程，先来先得
+* 非公平锁（Nonfair）：加锁时不考虑排队等待问题，直接尝试获取锁，获取不到自动到队尾等待；换句话说，非公平锁来了就先争夺一下，失败了再去排队。排队之后依然满足FIFO规则。  
+
+ReentrantLock与synchronized关键字一样，属于互斥锁，synchronized中的锁是非公平的（公平锁是指多个线程等待同一个锁时，必须按照申请锁的时间顺序来依次获得锁），ReentrantLock默认情况下也是非公平的，但可以通过带布尔值的构造函数要求使用公平锁。线程通过ReentrantLock的lock()方法获得锁，用unlock()方法释放锁。  
 
 _ _ _
 ### **总结**  
