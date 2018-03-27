@@ -467,4 +467,9 @@ public class InterruptTest {
 ```
 对于一些不理会Thread.interrupt()操作的I/O阻塞，就需要针对不同的情况做处理了。比如，socket阻塞在accpet函数，interrupt函数就无能为力了，这时候就可以通过socket的close函数来关闭端口。
 
+**Thread.interrupt使用的其他一些注意事项：**
+* 在线程使用start()方法启动之前，使用thread.interrupt()并不会有影响；线程启动之后，如果调用thread.interrupt()方法时其中断标志已经设置为true，本次interrupt()方法调用无影响。  
+* 中断已死的线程并不会产生任何影响。  
+* isInterrupted()与interrupted():从内部代码实现中可以看出两者区别仅仅在于查询中断状态之后是否清除中断标志位。  
+
 (完)
