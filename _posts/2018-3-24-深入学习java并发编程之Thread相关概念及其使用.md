@@ -107,8 +107,69 @@ new Thread(p).start();
 
 还有一种创建线程的方式是使用Callable接口和FutureTask方式，但这种方式实质上也是对于方式二的封装，因此没有单列出来。  
 
-关于线程创建时在os层面上究竟做了什么，可以参考：
-#### **线程相关属性的设置**
+关于线程创建时在os层面上究竟做了什么，可以参考我的另一篇博客：[深入学习java并发编程之创建一个线程并start()究竟做了什么？](https://wang-michael.github.io/2018/03/25/%E6%B7%B1%E5%85%A5%E5%AD%A6%E4%B9%A0java%E5%B9%B6%E5%8F%91%E7%BC%96%E7%A8%8B%E4%B9%8B%E5%88%9B%E5%BB%BA%E4%B8%80%E4%B8%AA%E7%BA%BF%E7%A8%8B%E5%B9%B6start()%E7%A9%B6%E7%AB%9F%E5%81%9A%E4%BA%86%E4%BB%80%E4%B9%88/)
+
+#### **线程的中断**
+* 如果被中断的线程阻塞在Object类对象的 wait(), wait(long), 或者 wait(long, int)等方法的调用上，或者是当前类的 join(), join(long), join(long, int), sleep(long), 或者 sleep(long, int)等方法，这些方法在抛出InterruptedException之前，Java虚拟机会先将该线程的的中断标识位清除，然后抛出InterruptedException，此时调用isInterrupted()方法将会返回false。  
+* 如果被中断的线程正阻塞在一个InterruptibleChannel上的IO操作，然后这个channel就会被关闭，这个线程的中断状态会被设置，然后这个线程会抛出ClosedByInterruptException。  
+* 如果这个线程正阻塞在一个Selector之上，然后这个线程的interrupt状态就会被设置并且会立即从select操作返回，返回值可能非0，就像是在这个selector上调用wakeup方法一样。  
+* 如果以上的条件都不成立，那么该线程的中断状态将被设置。比如说线程正阻塞于ServerSocket.accept()操作之上，此时对其使用interrupt()是没有影响的。但是在此线程上接下来的操作可能被interrupt()影响，比如调用sleep()操作。     
+* 中断已死的线程并不会产生任何影响。  
+* isInterrupted()与interrupted():从内部代码实现中可以看出两者区别仅仅在于查询中断状态之后是否清除中断标志位。  
+* 在线程使用start()方法启动之前，使用thread.interrupt()并不会有影响；线程启动之后，如果调用thread.interrupt()方法时其中断标志已经设置为true，本次interrupt()方法调用无影响。  
+```java
+public static boolean interrupted() {
+    return currentThread().isInterrupted(true);
+}
+
+public boolean isInterrupted() {
+    return isInterrupted(false);
+}  
+
+private native boolean isInterrupted(boolean ClearInterrupted);
+```
+interrupt内部如何实现的？为何sleep的同时还能查询中断状态？？？是轮询吗？？？ 
+```java
+/* Set the blocker field; invoked via sun.misc.SharedSecrets from java.nio code
+ */
+void blockedOn(Interruptible b) {
+    synchronized (blockerLock) {
+        blocker = b;
+    }
+}
+
+/* The object in which this thread is blocked in an interruptible I/O
+ * operation, if any.  The blocker's interrupt method should be invoked
+ * after setting this thread's interrupt status.
+ */
+private volatile Interruptible blocker;
+private final Object blockerLock = new Object();
+
+public void interrupt() {
+    if (this != Thread.currentThread())
+        checkAccess();
+
+    synchronized (blockerLock) {
+        Interruptible b = blocker;
+        if (b != null) {
+            interrupt0();           // Just to set the interrupt flag
+            // interrupt0() 只是设置了个标记，实际唤醒操作由b.interrupt(this);实现
+            // 唤醒阻塞的SocketChannel及Selector等
+            b.interrupt(this);
+            return;
+        }
+    }
+    interrupt0();// 用来唤醒sleep、wait、join等操作，通过park、unpark操作唤醒。  
+}
+
+private native void interrupt0();
+```
+socketChannel、ServerSocketChannel、Selector阻塞结束时通过interrupt唤醒的还是关闭通道时唤醒的？  
+
+sleep、join、wait等是通过interrupt唤醒的吗？  
+
+中断的使用场景？？？  
+#### **线程相关属性的设置**  
 **1、Thread.setPriority(int newPriority):**设置线程的优先级。  
 ```java
 public class PriorityTest {
@@ -179,3 +240,52 @@ priority: 10 counter: 4178632
 
 可见设置的优先级是起了作用的。
 ```
+
+**2、Thread.setDaemon(int newPriority):**设置线程的优先级；需要注意的是Daemon属性需要在启动线程之前设置，不能在启动线程之后设置。如果当前在JVM虚拟机中执行的线程已经没有非Daemon线程，虚拟机需要退出，**Java虚拟机中的所有Daemon线程都需要立即终止，即使其finally块中代码还没有执行。**  
+
+需要注意的一点是Daemon线程守护的是创建它的线程，会随创建它的线程执行结束而结束。
+```java
+public class DaemonThread {
+
+    private static class Thread1 implements Runnable {
+
+        @Override
+        public void run() {
+            try {
+                while (true) {
+                    System.out.println("Thread1执行");
+                    TimeUnit.SECONDS.sleep(1);
+                }
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            } finally {
+                System.out.println("finally 1 执行");
+            }
+        }
+    }
+
+    private static class Thread2 implements Runnable {
+
+        @Override
+        public void run() {
+            Thread daemonThread = new Thread(new Thread1());
+            daemonThread.setDaemon(true);
+            daemonThread.start();
+            try {
+                TimeUnit.SECONDS.sleep(10);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            } finally {
+                System.out.println("Thread2 finish");
+            }
+        }
+    }
+
+    public static void main(String[] args) {
+        Thread thread2 = new Thread(new Thread2());
+        thread2.start();
+        System.out.println("main finish");
+    }
+}
+// main线程结束之后对Thread1无影响，Thread2线程结束之后Thread1线程也会立即结束。  
+```   

@@ -5,9 +5,9 @@ date:       2018-3-25
 author:     W-M
 header-img: img/post-bg-coffee.jpeg
 catalog: true
-tags:
-    - java基础
+tags:    
     - 并发
+    - JDK源码阅读
 ---
 >本文关于Thread.start0() native方法源码分析的过程来源于文章[Java线程源码解析之start](https://www.jianshu.com/p/81a56497e073)，在文中部分地方加入了自己对于原作者文章中内容的理解，仅用于备忘。    
 
@@ -366,6 +366,7 @@ static void *java_start(Thread *thread) {
 当子线程完成初始化，将状态设置为NITIALIZED并唤醒父线程之后，父线程会执行Thread::start方法:
 ```c++
 void Thread::start(Thread* thread) {
+// \hotspot\src\share\vm\runtime\thread.cpp
   trace("start", thread);
   if (!DisableStartThread) {
     if (thread->is_Java_thread()) {//设置线程状态为RUNNABLE
@@ -385,6 +386,7 @@ void os::start_thread(Thread* thread) {
   pd_start_thread(thread);
 }
 
+// \hotspot\src\os\linux\vm\os_linux.cpp
 void os::pd_start_thread(Thread* thread) {
   OSThread * osthread = thread->osthread();
   assert(osthread->get_state() != INITIALIZED, "just checking");
