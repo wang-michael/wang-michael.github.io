@@ -111,6 +111,8 @@ new Thread(p).start();
 
 #### **线程的中断**
 关于线程中断详细介绍，可以参考另一篇博客：[深入学习java并发编程之Thread.interrupt()源码分析](https://wang-michael.github.io/2018/03/27/%E6%B7%B1%E5%85%A5%E5%AD%A6%E4%B9%A0java%E5%B9%B6%E5%8F%91%E7%BC%96%E7%A8%8B%E4%B9%8BThread.interrupt()%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90/)
+#### **线程的sleep和yield**
+关于线程sleep和yield详细介绍，可以参考另一篇博客：[深入学习java并发编程之Thread.interrupt()源码分析](https://wang-michael.github.io/2018/03/27/深入学习java并发编程之Thread.sleep()及Thread.yield()源码分析/)
 #### **线程相关属性的设置**  
 **1、Thread.setPriority(int newPriority):**设置线程的优先级。  
 ```java
