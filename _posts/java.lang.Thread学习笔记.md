@@ -85,14 +85,21 @@ new Thread(p).start();
 
 
 已过时的实例方法：为何过时？？？从什么时候开始过时的？？？
-* destroy()：
-* void resume()：
-* void stop()：
-* void suspend()：
+* void stop()：停止，可以使用volatile变量作为检测标志控制一个线程的停止
+* destroy()：破坏，从来没被实现过
+
+suspend与resume过时，对应的新的方法是Object.wait与notify。  
+* void resume()：恢复
+* void suspend()：暂停
+
+
 
 源码方法理解的顺序：
 start() -> run() -> interrupt()【包含interrupted与isInterrupted()】 -> join() -> sleep() -> yield() -> wait()
 
+线程组的概念，异常处理器，过时的几个实例方法
+
+ThreadLocal用法
 ## 三、其它Thread类相关概念 
 
 ### Thread可能的状态
