@@ -14,7 +14,7 @@ tags:
 _ _ _
 ### **Java中线程的几种状态**
 * NEW：一个还没开始的线程处于这种状态
-* RUNNABLE：一个正在执行的线程的状态；处于这种状态的线程有可能正在被虚拟机执行，也有可能在等待操作系统的其它资源(例如处理器)，我觉得也可以理解为通常说的就绪状态
+* RUNNABLE：一个正在执行的线程的状态；处于这种状态的线程有可能正在被虚拟机执行，也有可能在等待操作系统的其它资源(例如处理器)，我觉得也可以理解为通常说的就绪状态(比如java socket.accept实现的阻塞式IO中被阻塞的线程实际处于RUNNABLE状态)。
 * BLOCKED：处于这个状态的线程是在等待获取监视器上的锁；通常有两种情况，一是执行synchronized块或方法之前等待获取监视器上的锁；二是在调用Object.wait()方法之后被notify，等待重新获取synchronized块或方法上监视器的锁
 * WAITING：处于waiting状态上的线程通常是在等待另一个线程来执行一个特殊的操作；通常有以下三种情况：一、调用Object.wait()方法并且不指定超时参数；二、调用Thread.join()方法并且不指定超时参数；三、调用LockSupport.park方法。 举例来说，调用Object.wait()方法的线程需要等待另一个线程在这个对象上调用Object.notify()或者Object.notifyAll()方法；调用了Thread.join()方法的线程需要waiting到指定线程结束之后才继续执行。  
 * TIMED_WAITING：处于waitting状态，但最多waitting到指定的超时时间；通常在调用以下方法之后进入到这种状态：Thread.sleep(),调用指定时间参数的Object.wait(),调用指定时间参数的Thread.sleep(),调用LockSupport.parkNanos及LockSupport.parkUntil方法。  
@@ -112,7 +112,7 @@ new Thread(p).start();
 #### **线程的中断**
 关于线程中断详细介绍，可以参考另一篇博客：[深入学习java并发编程之Thread.interrupt()源码分析](https://wang-michael.github.io/2018/03/27/%E6%B7%B1%E5%85%A5%E5%AD%A6%E4%B9%A0java%E5%B9%B6%E5%8F%91%E7%BC%96%E7%A8%8B%E4%B9%8BThread.interrupt()%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90/)
 #### **线程的sleep和yield**
-关于线程sleep和yield详细介绍，可以参考另一篇博客：[深入学习java并发编程之Thread.interrupt()源码分析](https://wang-michael.github.io/2018/03/27/%E6%B7%B1%E5%85%A5%E5%AD%A6%E4%B9%A0java%E5%B9%B6%E5%8F%91%E7%BC%96%E7%A8%8B%E4%B9%8BThread.sleep()%E5%8F%8AThread.yield()%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90/)  
+关于线程sleep和yield详细介绍，可以参考另一篇博客：[深入学习java并发编程之Thread.sleep()及Thread.yield()源码分析](https://wang-michael.github.io/2018/03/27/%E6%B7%B1%E5%85%A5%E5%AD%A6%E4%B9%A0java%E5%B9%B6%E5%8F%91%E7%BC%96%E7%A8%8B%E4%B9%8BThread.sleep()%E5%8F%8AThread.yield()%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90/)  
 #### **Object.wait()和Thread.join()**
 关于此部分的详细介绍，可以参考另一篇博客：
 [深入学习java并发编程之Object.wait及Thread.join源码分析](https://wang-michael.github.io/2018/03/28/%E6%B7%B1%E5%85%A5%E5%AD%A6%E4%B9%A0java%E5%B9%B6%E5%8F%91%E7%BC%96%E7%A8%8B%E4%B9%8BObject.wait%E5%8F%8AThread.join%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90/)  

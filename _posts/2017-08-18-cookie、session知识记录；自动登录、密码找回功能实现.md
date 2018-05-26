@@ -13,7 +13,7 @@ tags:
 _ _ _
 ### **1. cookie、session知识记录**
 &emsp;&emsp;(1)cookie存于客户端，session存于服务器端，cookie超时时间默认为浏览器关闭即失效，tomcat中session默认为20分钟失效。  
-&emsp;&emsp;(2)cookie超时时间计算方法为自cookie生成时间起到当前时间，session超时时间计算方法为此session自最后一次使用时间起到当前时间。比如cookie生成时间为某天8点整，设置存活时间为4个小时，则在8点到12点之间cookie有效，超过12点，cookie失效；session生成时间也为某天8点整，存活时间30分钟，若用户在此30分钟内未使用此session，则在8点30失效，若用户在8点10分使用了session进行了某些操作，则session失效时间变为了8点40。  
+&emsp;&emsp;(2)cookie超时时间计算方法为自cookie生成时间起到当前时间，session超时时间计算方法为此session自最后一次使用时间起到当前时间。比如cookie生成时间为某天8点整，设置存活时间为4个小时，则在8点到12点之间cookie有效，超过12点，cookie失效；session生成时间也为某天8点整，存活时间30分钟，若用户在此30分钟内未使用此session，则在8点30失效，若用户在8点10分使用了session进行了某些操作，则session失效时间变为了8点40。所以一般不需要担心在一次请求过程中间session突然失效的问题，比如session超时时间为30分钟，一次请求中拿到了此session，此session至少会在当前时间之后的30min才被超时清理，而此时一次请求早已结束。    
 &emsp;&emsp;(3)浏览器多窗口可能共享同一个session，所以session中存储对象的话，要注意线程安全问题。session.set(get)Attribute()方法本身是线程安全的，但是从session中取出来的对象使用时要注意线程安全问题。比如从session中取出一个user对象，之后对此user对象进行操作，要注意user对象中的线程间共享数据(比如hashmap)的线程安全性问题。  
 &emsp;&emsp;(4)服务器通过客户端cookie中存储的jsessionId来判断当前用户对应的session(以tomcat为例)，若客户端禁用cookie，必须通过在前端向后端请求的url中添加 ;JSESSIONID=××× 方式来获取session。  
 &emsp;&emsp;(5)cookie.setPath()方法可限制cookie的访问路径；cookie.setPath("/")限制当前域名下所有web应用的url路径均可访问此cookie,cookie.setPath("/webapp1/")限制当前域名下仅webapp1应用下的url路径可访问此cookie。  
@@ -57,7 +57,7 @@ _ _ _
 
 &emsp;&emsp;此种限制单用户登录的方法要求两用户必须都通过用户名密码登录的方式才有效。比如A用户登陆后，B用户盗取A用户的cookie之后是可以登录的，这就会出现多用户同时登录的情况。防止cookie被盗取可以设置cookie的httponly属性。  
 
-&emsp;&emsp;自动登录流程中提到了需要根据sessionId获取session的需求，这需要下面的一个工具类：  
+&emsp;&emsp;自动登录流程中仅支持单用户登录的需求中提到了需要根据sessionId获取session以便使之前此用户的登录无效的需求，这需要下面的一个工具类：  
 ```java
     import javax.servlet.http.HttpSession;
     import java.util.concurrent.ConcurrentHashMap;
