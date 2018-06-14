@@ -1,9 +1,9 @@
 # java.util.concurrent包学习笔记
 ## 一、概述 
 java.util.concurrent中更高级的工具分成3类：Executor Framework、并发集合(Concurrent Collection)以及同步器(Synchronizer)。
-1、学习java中同步器(Synchronizer) Semaphore Exchanger
+1、学习java中同步器(Synchronizer) Semaphore Exchanger，lock接口及相关实现
 2、学习java中并发集合结合传统集合类来学习
-3、学习java中Executor Framework
+3、学习java中Executor Framework，Future-callable
 
 ## 二、同步器(Synchronizer)
 ###CountDownLatch
@@ -185,5 +185,188 @@ CyclicBarrier建立的happens-before关系：
 * CyclicBarrier：**等待线程的数量是固定的，每个线程既是等待线程也是通知线程**，当最后一个等待线程到来时，所有的等待线程会停止阻塞，继续执行；功能没有CountDownLatch强大，但可以循环使用；
 * Wait-Notify：**等待线程的数量是不固定的，通知线程的数量可以是一个(调用notifyAll方法)或多个(notify与notifyAll方法结合使用)**，countDownLatch中调用countDown()方法的线程可以类比于wait-notify中调用notify()方法的线程，调用await方法的线程可以类比于调用wait方法的线程；显而易见，countDownLatch在notify等待线程方式上相比于wait-notify方式更强，可以在指定数量的notify线程执行countDown()方法之后才放行等待线程。 但是wait-notify相比于countDownLatch的优势在于可以循环使用。  
 
-###CyclicBarrier
+### LOCK
 ---
+API文档翻译:
+```java
+LOCK实现提供比使用Synchronized方法和语句可获得的锁定操作更广泛的锁定操作。 它们允许更灵活的结构化，可能具有完全不同的属性，并且可以支持多个关联的Condition对象。
+
+Lock是一个控制多线程共享资源访问的工具，通常情况下，一个lock提供了一个对于共享资源的唯一的访问方式：一次只能有一个线程获取到锁并且所有对于共享资源的访问都需要首先获取到锁。当然也有例外，有些锁允许对于共享资源的并发访问，比如ReadWriteLock中的读锁。  
+
+synchronized方法和段落提供了与其关联对象的隐式的锁获取和释放，并且多个锁被获取的时候，这些锁必须以相反的顺序被释放。  
+
+synchronized提供的锁机制是易于编程实现的，帮助我们避免了许多涉及到锁的编程错误，当然还有一些场合你需要更自由的使用锁。比如Lock提供的锁机制允许你获取和释放锁使用任意的顺序，而不仅仅是与获取锁的顺序相反。  
+
+增长的自由度伴随着额外的责任，通常情况下，需要这样使用Lock：  
+
+ Lock l = ...;
+ l.lock();
+ try {
+   // access the resource protected by this lock
+ } finally {
+   l.unlock();
+ }
+
+我们需要确保在出现异常情况时Lock也可以被正确的释放。  
+
+Lock相比于synchronized提供了一些额外的功能，比如非阻塞式的获取锁:tryLock();可中断式的获取锁(即在锁的获取过程中可以中断当前线程):lockInterruptibly();可超时的获取锁：tryLock(long, TimeUnit)。  
+
+Lock类还可以提供与隐式监视器锁定(比如synchronized)非常不同的行为和语义，比如保证顺序？、不可重入锁的使用以及死锁检测。
+
+记住Lock实例只是一个普通的对象，甚至它自己也可以作为synchronized中的monitor。使用synchronized获取Lock对象的monitor锁与调用lock()方法获取lock对象的锁之间没有任何关系。为了避免歧义，永远不要在synchronized的目标对象中选择lock实例，这会引起歧义。  
+
+成功的lock和unlock操作都需要内存同步语义，不成功的lock和unlock操作和重入的lock和unlock操作，不需要任何内存同步的语义。  
+```
+问题1：锁住的共享资源指的是什么资源？？？怎么样才叫被锁住了？？？一个Lock可以关联多个共享资源吗？？？    
+
+### AbstractQueuedSynchronizer
+---
+AbstractQueuedSynchronizer是用来构建锁或者其他同步组件的基础框架，它使用了一个int成员变量表示同步状态，通过内置的FIFO队列来完成资源获取线程的排队工作。只有掌握了同步器的工作原理才能更加深入的理解并发包中的其它并发组件。并发包的作者希望AbstractQueuedSynchronizer成为实现大部分同步需求的基础。
+
+API文档翻译:
+```java
+根据先进先出的等待队列实现的框架，这个框架可以用来实现阻塞式的锁和其它相关的synchronizers(semaphores、events等等)。这个类的设计目标是作为那些依赖于单一atomic int值来代表状态的synchronizers的实现基础。子类必须在protected方法中定义状态的改变，并且定义这些状态的含义：比如代表这个对象被获取或者被释放。鉴于这个目标，这个类中的其它方法致力于实现所有的排队和阻塞机制。子类可以维护其它的状态值，但是只有使用getState(),setState()和compareAndSetState(int, int)操作的原子int值是与同步相关的。  
+
+用来实现自定义类的同步特性的AbstractQueuedSynchronizer类的子类应该被定义为外部类的非public的内部类。AbstractQueuedSynchronizer类不实现任何同步接口，其内部定义了一些诸如acquireInterruptibly(int)一类的方法用来被具体的锁或同步器实现他们的public方法时调用。    
+
+这个类同时支持独占式和共享式获取。当使用独占式获取时，其它线程的获取尝试不能成功。多线程的共享式获取可能会成功。等待在不同模式中的线程共享同一个FIFO队列，通常情况下子类的实现只支持这些模式中的一个，但是有的情况两种模式也可能都支持:比如ReadWriteLock。对于只支持独占式或者只支持共享式的子类不需要实现方法来支持不实现的模式。    
+
+作为同步器的基础使用这些方法时，需要重定义以下方法，并在这些方法中使用getState(), setState(int) and/or compareAndSetState(int, int)方法来检查、更改同步的状态。  
+
+使用者可以重定义的方法有tryAcquire(int)、tryRelease(int)、tryAcquireShared(int)、tryReleaseShared(int)、isHeldExclusively()，重定义这些方法的实现时，方法内部通常应该是线程安全的、代码短小并且不会阻塞的。继承AbstractQueuedSynchronizer类并重定义这些方法是实现自定义同步类的唯一手段，AbstractQueuedSynchronizer类中所有的其它方法都是final的，不能独立变化。
+
+您也可以从AbstractOwnableSynchronizer中找到继承的方法，以便跟踪拥有独占同步器的线程。 我们鼓励您使用它们 - 这是监视和诊断工具，能够帮助用户确定哪些线程持有锁。  
+
+这个类为部分同步类的实现提供了一个高效的、易于扩展的同步基础的实现。当这个类的功能不够使用时，可以使用更底层的atomic类，自定义的Queue类和LockSupport类来实现同步器。  
+```
+自定义同步组件---->调用同步器提供的模板方法---->调用使用者重写的方法---->在重写的方法中调用getState、setState、compareAndSetState方法修改同步状态。
+
+使用者可以重写的方法包含AbstractQueuedSynchronizer中的：
+* tryAcquire(int)
+* tryRelease(int)
+* tryAcquireShared(int)
+* tryReleaseShared(int)
+* isHeldExclusively()
+
+可以重写AbstractOwnableSynchronizer中哪些方法呢？重写这些方法有何作用呢？？？  
+
+使用示例：
+这是一个不可重入的互斥锁类，它使用零值表示解锁状态，一表示锁定状态。尽管非重入锁并不严格要求记录当前所有者线程，但该类还是这样做了，以便更易于监视使用。这个类还支持condition并暴露了一个instrumentation methods。
+```java
+class Mutex implements Lock, java.io.Serializable {
+
+   // Our internal helper class
+   private static class Sync extends AbstractQueuedSynchronizer {
+     // Reports whether in locked state
+     protected boolean isHeldExclusively() {
+       return getState() == 1;
+     }
+
+     // Acquires the lock if state is zero
+     public boolean tryAcquire(int acquires) {
+       assert acquires == 1; // Otherwise unused
+       if (compareAndSetState(0, 1)) {
+         setExclusiveOwnerThread(Thread.currentThread());
+         return true;
+       }
+       return false;
+     }
+
+     // Releases the lock by setting state to zero
+     protected boolean tryRelease(int releases) {
+       assert releases == 1; // Otherwise unused
+       if (getState() == 0) throw new IllegalMonitorStateException();
+       setExclusiveOwnerThread(null);
+       setState(0);
+       return true;
+     }
+
+     // Provides a Condition
+     Condition newCondition() { return new ConditionObject(); }
+
+     // Deserializes properly
+     private void readObject(ObjectInputStream s)
+         throws IOException, ClassNotFoundException {
+       s.defaultReadObject();
+       setState(0); // reset to unlocked state
+     }
+   }
+
+   // The sync object does all the hard work. We just forward to it.
+   private final Sync sync = new Sync();
+
+   public void lock()                { sync.acquire(1); }
+   public boolean tryLock()          { return sync.tryAcquire(1); }
+   public void unlock()              { sync.release(1); }
+   public Condition newCondition()   { return sync.newCondition(); }
+   public boolean isLocked()         { return sync.isHeldExclusively(); }
+   public boolean hasQueuedThreads() { return sync.hasQueuedThreads(); }
+   public void lockInterruptibly() throws InterruptedException {
+     sync.acquireInterruptibly(1);
+   }
+   public boolean tryLock(long timeout, TimeUnit unit)
+       throws InterruptedException {
+     return sync.tryAcquireNanos(1, unit.toNanos(timeout));
+   }
+ }
+}
+```
+
+AbstractQueuedSynchronizer方法及其简单使用：
+1. 需要被使用者子类重定义的5个方法：  
+```java
+1、protected boolean tryAcquire(int arg)：尝试以独占锁的方式获取锁，这个方法应该询问当前锁对象是否允许以独占模式被获取，如果允许的话再获取。这个方法通常被尝试获取锁的线程调用，如果这个方法报告占锁失败，则可以使用acquire方法将此线程入队等待，直到被其它释放锁的线程唤醒。这个方法可以用来实现Lock.tryLock()。  
+
+arg参数通常情况下可以是传递到acquire方法中的参数，或者是进入条件等待时保存的值，甚至可以是任意自己喜欢的值。  
+
+Lock.tryLock()：尝试非阻塞的获取锁，调用该方法后立刻返回，如果能够获取则返回true，否则返回false。  
+
+2、protected boolean tryRelease(int arg)：尝试设置一个在独占锁情况下代表锁释放的状态的值，通常被执行释放操作的线程调用。
+
+arg参数通常是传递到release()方法中的参数或进入条件等待时的当前状态值，甚至是任意喜欢的值。
+
+3、protected int tryAcquireShared(int arg)：与tryAcquire方法不同之处仅在于尝试以共享模式获取锁。  
+
+返回值：负数代表失败，0代表当前以共享模式获取锁成功，但是后续的以共享模式获取锁的操作一定不能成功；正数代表当前以共享模式获取锁的线程获取成功并且之后的线程的共享模式获取操作也有可能成功。
+
+4、protected boolean tryReleaseShared(int arg)：尝试将状态设置为共享锁释放的状态。其余与tryRelease方法相同。  
+
+5、protected boolean isHeldExclusively()：如果同步操作被当前线程同步占有的话返回true。这个方法仅仅被AbstractQueuedSynchronizer.ConditionObject类中的non-waiting方法调用(waiting 方法调用的是release(int))。由于这个方法仅仅在AbstractQueuedSynchronizer.ConditionObject内部类时使用到，所以如果我们实现自定义同步组件时没有用到AbstractQueuedSynchronizer.ConditionObject对象的话，就没有必要重写这个方法了。  
+
+```
+2.
+
+###ReadWriteLock
+---
+API文档翻译
+```java
+读写锁允许访问共享数据的并发性水平高于互斥锁允许的水平。 它利用了这样一个事实，即一次只有一个线程（一个编写器线程）可以修改共享数据，在很多情况下，任何数量的线程都可以同时读取数据（因此读取器线程）。 理论上，使用读写锁定所允许的并发性增加将导致性能提高超过使用互斥锁。 实际上，这种并发性的增加只能在多处理器上完全实现，并且只有在共享数据的访问模式合适时才会如此。
+
+读写锁是否会提高使用互斥锁的性能取决于数据读取的频率与被修改的频率，读取和写入操作的持续时间以及数据的争用——也就是，尝试同时读取或写入数据的线程数。例如，一个最初用数据填充并且此后不经常修改，而频繁搜索（例如某种目录）的集合是使用读写锁定的理想候选。然而，如果更新变得频繁，那么数据的大部分时间都被锁定，并且几乎没有并发的增加。此外，如果读取操作太短，则读写锁定实现（本质上比互斥锁定更复杂）的开销占据了执行成本的大部分，特别是因为许多读写锁定实现仍然通过小部分代码互斥执行。最终，只有分析和测量才能确定使用读写锁是否适合您的应用程序。  
+
+实现时需要考虑的几个问题：
+1. 在写锁释放锁定时，如果读锁和写锁都在等待，是把锁给读锁还是写锁呢？偏向写锁的情况很常见，因为写操作通常很短且很少发生；偏向读操作则并不常见，因为读操作如果频繁且耗时，会导致写操作的长时间延迟。当然公平的实现也是有可能的。
+2. 当读锁处于进行状态时，有写锁和读锁请求正在等待，先给谁呢？偏向读操作可能会导致写操作的长时间延迟，偏向写操作会降低并发量。  
+3. 确定这些锁是否是可重入的：一个带有写入锁的线程是否可以重新获取此写锁？ 可以在保持写锁的同时获取读锁吗？ 读锁本身是否可重入？--->都可以的。  
+4. 写锁降级为读锁的时候是否不允许其他写锁参与？---->是的。 一个读锁能否升级为写锁而不是偏向于其他的读锁或写锁？---->不能
+```
+ReentrantReadWriteLock的API文档翻译:
+```java
+ReentrantReadWriteLock类具有以下特性：
+1. 不支持强制定制读写偏好，但支持公平性与非公平性定制。 当构造为不公平（缺省）时，读写锁的输入顺序未指定，但受重入限制的约束。 持续争用的非公平锁可以无限期地推迟一个或多个读或写线程，但通常具有比公平锁更高的吞吐量。  当构建为公平时，线程使用到达顺序策略竞争进入。 当前持有的锁被释放时，等待时间最长的单写入器线程将被分配写入锁，或者如果有一组读取器线程等待的时间比所有等待的写入器线程长，则该组将被分配读取锁。
+
+2. 可重入
+
+3. 锁降级
+
+4. 锁获取期间可中断
+
+5. Condition support：只有写锁支持Condition，读锁不支持。
+   
+6. 检测工具支持：比如通过getReadLockCount等方法监测其内部工作状态。   
+
+ReentrantReadWriteLock类可用于提高某些集合的某种用途的并发性。这这种情况通常具备以下条件：集合很大、被读线程访问的次数更多、对集合进行某些操作的开销比同步的开销大。比如一个使用了TreeMap的类，该TreeMap预计会很大并且会同时被访问。  
+
+```
+
+待做：countdownLatch分析，英语作业ppt准备，终端答辩准备，计算机视觉作业等等。。。

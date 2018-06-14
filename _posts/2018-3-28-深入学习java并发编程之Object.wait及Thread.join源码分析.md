@@ -328,11 +328,13 @@ Policy == 3：放入_cxq队列中，末尾位置；更新_cxq变量的值的时�
 **问题：**当_cxq队列不为空(也就是进入下面for循环中的else中)，为什么不使用CAS操作更新呢？？？  
 <img src="/img/2018-3-28/img13.png" width="660" height="660" alt="源码" />
 
-Policy等于其他值，立即唤醒ObjectWaiter对应的线程；
+Policy等于其他值，立即唤醒ObjectWaiter对应的线程；  
 
 小结一下，线程B执行notify时候做的事情：
 1. 执行过wait的线程都在队列_WaitSet中，此处从_WaitSet中取出第一个；
 2. 根据Policy的不同，将这个线程放入_EntryList或者_cxq队列中的起始或末尾位置；
+
+注意:调用Object.notify方法并不会释放锁，所做的工作只是将wait的线程由waitset移动到其它队列中，锁的释放是在synchronized代码块中所有代码执行之后而不是notify执行之后。    
 
 #### **线程B释放锁的时候做了什么**  
 接下来到了揭开问题的关键了，我们来看objectMonitor.cpp的ObjectMonitor::exit方法；
@@ -447,9 +449,9 @@ throws InterruptedException {
 ```
 从上面的源码可以看到，逻辑实现比较简单，通过while循环查看线程状态(isAlive()),如果线程活着，调用Object.wait()方法等待；  
 
-wait()方法的实现上面已经介绍的比较清楚，现在的问题是：  
+join()方法的实现上面已经介绍的比较清楚，现在的问题是：  
 1. 如何判断线程是否活着呢？
-2. wait()方法是在什么时候被唤醒的呢？  
+2. join()方法是在什么时候被唤醒的呢？  
 
 #### **如何判断线程是否活着？**
 isAlive是个native方法，具体实现在jvm.cpp文件:
@@ -471,7 +473,7 @@ bool java_lang_Thread::is_alive(oop java_thread) {
 可以看到是通过Thread的eetop找到内部的JavaThread, 如果为NULL,则表示线程已死;
 好，第一个问题得到解决。  
 
-#### **wait()方法在什么时候被唤醒的呢？**
+#### **join()方法在什么时候被唤醒的呢？**
 在前面的文章深入学习[java并发编程之创建一个线程并start()究竟做了什么？](https://wang-michael.github.io/2018/03/25/%E6%B7%B1%E5%85%A5%E5%AD%A6%E4%B9%A0java%E5%B9%B6%E5%8F%91%E7%BC%96%E7%A8%8B%E4%B9%8B%E5%88%9B%E5%BB%BA%E4%B8%80%E4%B8%AA%E7%BA%BF%E7%A8%8B%E5%B9%B6start()%E7%A9%B6%E7%AB%9F%E5%81%9A%E4%BA%86%E4%BB%80%E4%B9%88/)的最后，说到:  
 > 当run方法执行结束,会调用JavaThread::exit方法清理资源
 
