@@ -394,11 +394,11 @@ private void unparkSuccessor(Node node) {
 }
 ```
 到此为止，acquire(int arg)的整个方法执行过程已经介绍完了，接下来看两张图更形象的认识一下其执行过程：  
-<img src="/img/2018-6-11/CASSynState.png" width="500" height="500" alt="acquireQueued方法节点自旋获取同步状态图" />  
+<img src="/img/2018-6-11/CASSynState.png" width="650" height="650" alt="acquireQueued方法节点自旋获取同步状态图" />  
 <center>图9：acquireQueued方法节点自旋获取同步状态图</center>  
 
 图10展示了acquire(int arg)方法的调用流程：  
-<img src="/img/2018-6-11/acquireProcess.png" width="500" height="500" alt="acquire(int arg)方法调用流程" />  
+<img src="/img/2018-6-11/acquireProcess.png" width="650" height="650" alt="acquire(int arg)方法调用流程" />  
 <center>图10：acquire(int arg)方法调用流程</center>  
 
 最后对acquire(int arg)方法的执行过程做一个简单总结：   
@@ -426,7 +426,7 @@ public final boolean release(int arg) {
 
 #### **acquireShared(int arg)源码分析**
 从方法名称中就可以看出与acquire(int arg)方法的不同之处在于尝试以共享的方式访问资源，即获取同步状态，首先来看下共享式获取与独占式获取的对比： 
-<img src="/img/2018-6-11/acquireShared.png" width="500" height="500" alt="共享式访问与独占式访问对比" />  
+<img src="/img/2018-6-11/acquireShared.png" width="650" height="650" alt="共享式访问与独占式访问对比" />  
 <center>图11：共享式访问与独占式访问对比</center>   
 
 在图11中，左半部分，共享式访问资源时，其它共享式的访问均被允许，而独占式访问被阻塞，右半部分是独占式访问资源时，同一时刻其它访问均被阻塞。  
