@@ -285,7 +285,7 @@ _ _ _
 　　　 　　　　//若原来元素是红黑树节点，调用红黑树的插入方法:putTreeVal
             else if (p instanceof TreeNode)
                 e = ((TreeNode<K,V>)p).putTreeVal(this, tab, hash, key, value);
-            else {//证明原来的元素是链表的头结点，从此节点开始向后寻找合适插入位置
+            else {//证明原来的元素是链表的头结点，从此节点开始向后寻找合适插入位置，注意此处新来的节点插入到链表的尾部
                 for (int binCount = 0; ; ++binCount) {
                     if ((e = p.next) == null) {
 　　　　　　　//找到插入位置后，新建节点插入
