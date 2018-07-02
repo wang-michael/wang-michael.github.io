@@ -6,7 +6,7 @@ author:     W-M
 header-img: img/post-bg-coffee.jpeg
 catalog: true
 tags:
-    - java基础
+    - Java基础
     - 并发
 ---
 >本文大部分内容来源于[jdk源码剖析二: 对象内存布局、synchronized终极原理](http://www.cnblogs.com/dennyzhangdd/p/6734638.html)，在文中部分地方加入了自己对于原作者文章中内容的理解，仅用于备忘。    

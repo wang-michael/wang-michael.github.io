@@ -6,7 +6,7 @@ author:     W-M
 header-img: img/post-bg-coffee.jpeg
 catalog: true
 tags:
-    - java基础
+    - Java基础
     - 并发
 ---
 >本文主要介绍了自己对于java.lang.Thread类中相关API的学习及理解。  

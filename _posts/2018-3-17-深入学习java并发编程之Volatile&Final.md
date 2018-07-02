@@ -6,7 +6,7 @@ author:     W-M
 header-img: img/post-bg-coffee.jpeg
 catalog: true
 tags:
-    - java基础
+    - Java基础
     - 并发
 ---
 
