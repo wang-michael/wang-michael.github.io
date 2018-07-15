@@ -301,7 +301,7 @@ _ _ _
                     p = e;
                 }
             }//end else
-            if (e != null) { // 待插入元素在　hashMap 中已存在
+            if (e != null) { // 待插入元素在 hashMap 中已存在
                 V oldValue = e.value;
                 if (!onlyIfAbsent || oldValue == null)
                     e.value = value;
@@ -478,7 +478,7 @@ resize()方法中比较重要的是链表和红黑树的 rehash 操作，先来�
 <img src="/img/2017-2-17/keyStructure.png" width="700" height="700" alt="keyStructure" />
 <center>图4：使用key确定索引位置示意图</center>  
 
-元素在重新计算hash之后，因为n变为2倍，那么n-1的mask范围在高位多1bit(红色)，因此新的index就会发生这样的变化：
+元素在重新计算hash之后，因为n变为2倍，那么n-1的mask范围在高位多1bit(红色)，因此新的index就会发生这样的变化：  
 <img src="/img/2017-2-17/indexchange.png" width="700" height="700" alt="indexchange" />
 <center>图5：rehash导致索引位置变化</center>   
 
@@ -548,7 +548,7 @@ final Node<K,V>[] resize() {
                 else if (e instanceof TreeNode)
                     ((TreeNode<K,V>)e).split(this, newTab, j, oldCap);
 　　　　　　　　　　　　//若是链表，进行链表的 rehash　操作
-                else { // preserve order
+                else { // preserve order，注意rehash后链表中元素的相对位置并没有改变
                     Node<K,V> loHead = null, loTail = null;
                     Node<K,V> hiHead = null, hiTail = null;
                     Node<K,V> next;
@@ -639,9 +639,72 @@ final void split(HashMap<K,V> map, Node<K,V>[] tab, int index, int bit) {
 }//end split
 ```
 
-关于　HashMap 源码阅读的相关知识就先介绍到这里，有一些地方我还没有理解透彻（例如红黑树的插入节点之后的平衡操作，删除节点操作），后期会继续补充。  
+_ _ _
+### **HashMap 并发put出现死循环(JDK1.7)**  
+我们知道，HashMap是线程不安全的，在并发环境下操作HashMap会出现内部数据不一致的情况，可以使用HashTable(已过时)、Collections.synchronized()方法包装、ConcurrentHashMap等三种方式来替换HashMap，其中ConcurrentHashMap最为高效。  
 
-**待补充:**HashMap并发操作时存在的问题原因解释，比如并发操作时可能出现死循环等。
+在JDK1.7并发环境下对HashMap做put操作在resize方法中可能出现链表成环状，在get操作时出现死循环问题，JDK1.8中避免了这个问题，但这并不意味着在JDK1.8中使用HashMap就是线程安全的，还是可能出现内部数据不一致，结果不可预测的问题。  
+
+下面就来介绍下JDK1.7中的多线程put操作死循环问题及JDK1.8中是如何将其避免的。  
+
+JDK1.7中的resize方法如下：  
+```java
+void resize(int newCapacity) {
+	Entry[] oldTable = table;
+	int oldCapacity = oldTable.length;
+	if (oldCapacity == MAXIMUM_CAPACITY) {
+		threshold = Integer.MAX_VALUE;
+		return;
+	}
+
+	Entry[] newTable = new Entry[newCapacity];
+	transfer(newTable, initHashSeedAsNeeded(newCapacity));
+	table = newTable;
+	threshold = (int)Math.min(newCapacity * loadFactor, MAXIMUM_CAPACITY + 1);
+}
+void transfer(Entry[] newTable, boolean rehash) {
+	int newCapacity = newTable.length;
+	for (Entry<K,V> e : table) {
+		while(null != e) {
+			Entry<K,V> next = e.next; // 标记1
+			if (rehash) {
+				e.hash = null == e.key ? 0 : hash(e.key);
+			}
+			int i = indexFor(e.hash, newCapacity);
+			e.next = newTable[i]; // 标记2
+			newTable[i] = e;
+			e = next;
+		}
+	}
+}
+```  
+假设有两个线程同时执行上述resize方法中的transfer方法，线程1执行完标记1所在的一行代码之后线程2开始执行并执行到完毕。执行之后示意图如下：  
+<img src="/img/2017-2-17/step1.png" width="700" height="700" alt="keyStructure" />
+<center>图7：执行步骤1</center>  
+
+线程2执行完毕之后key值为3的next节点变为null，key值为7的节点的next节点变为key值3。**也就是说重新散列之后交换了key值为3的节点和key值为7的节点的相对顺序。**  
+
+之后线程1恢复执行，执行到标记2所在的一行代码之后key值为3的next节点指向newTable[i] (newTable[i]此时为空)。之后令newTable[i]等于key值为3的节点，最后让e变为key值为7的节点。执行后状态如下：    
+<img src="/img/2017-2-17/step2.png" width="700" height="700" alt="keyStructure" />
+<center>图8：执行步骤2</center>
+
+之后线程1继续循环执行到标记1，next变为key值为3的节点，之后执行到标记2，让key值为7的节点的next为key值为3的节点，最后让e变为key值为3的节点。执行后状态如下：    
+<img src="/img/2017-2-17/step3.png" width="700" height="700" alt="keyStructure" />
+<center>图9：执行步骤3</center>
+
+之后线程1又继续循环到标记1的位置，next变为null，之后执行到标记2，让key值为3的节点的next为key值为7的节点，注意此时链表的环形状态已经出现了。最后让e=next，即e变为null。
+
+由于e==null，跳出循环，线程1 put操作结束了。执行后状态如下：  
+<img src="/img/2017-2-17/step4.png" width="700" height="700" alt="keyStructure" />
+<center>图10：执行步骤4</center>  
+
+此时再向此HashMap中bucket为3的槽中插入新的元素(新的元素会被插入到链表的尾部)，就会出现无限循环。  
+
+**究其出现无限循环的原因，是由于重新散列之后链表中节点的相对顺序会被反转。比如重散列之前key值为3的节点的next节点是key值为7的节点，重散列之后key值为7的节点的next变为了key值为3的节点，相对位置反转了。**  
+
+JDK1.8的resize方法中在重散列的时候通过loHead、loTail和hiHead、hiTail指针保留了链表中元素的相对顺序，解决了这个问题，具体方式见上述JDK1.8 resize方法源码。    
+
+关于　HashMap 源码阅读的相关知识就先介绍到这里。  
 
 (完)  
 

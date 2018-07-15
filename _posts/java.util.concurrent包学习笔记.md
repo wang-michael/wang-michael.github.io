@@ -369,4 +369,33 @@ ReentrantReadWriteLock类可用于提高某些集合的某种用途的并发性�
 
 ```
 
-待做：等等。。。  
+## 三、并发集合
+###ConcurrentHashMap
+API文档翻译
+```java
+ConcurrentHashMap是一个哈希表，支持检索的完全并发和更新的高预期并发性。 该类遵循与Hashtable相同的功能规范，并包括与Hashtable的每个方法相对应的方法版本。 但是，即使所有操作都是线程安全的，检索操作也并不意味着锁定，并且不支持以阻止所有访问的方式锁定整个表。 在依赖于线程安全但不依赖于其同步细节的程序中，此类可与Hashtable完全互操作。
+
+检索操作（包括get）通常不会阻塞，因此可能与更新操作（包括put和remove）同时进行。检索反映了最近完成的更新操作的结果。 （更正式地说，更新操作与在其之后进行的检索操作之间存在Happens-Before关系)。  
+
+对于诸如putAll和clear之类的聚合操作，并发检索可能反映仅插入或删除某些条目。 类似地，Iterators，Spliterators和Enumerations在迭代器/枚举的创建时或之后的某个时刻返回反映哈希表状态的元素。 它们不会抛出ConcurrentModificationException。 但是，迭代器设计为一次只能由一个线程使用。 请记住，聚合状态方法（包括size，isEmpty和containsValue）的结果通常仅在映射未在其他线程中进行并发更新时才有用。 否则，这些方法的结果反映了可能足以用于监视或估计目的的瞬态，但不适用于程序控制。 
+
+当存在太多冲突时（即，具有不同哈希码的密钥但落入以表大小为模的相同槽中的密钥），该表被动态扩展，具有每个映射大致保持两个箱的预期平均效果（对应于0.75负载）调整大小的因子阈值）。随着映射的添加和删除，这个平均值可能会有很大的差异，但总的来说，这维持了哈希表的普遍接受的时间/空间权衡。但是，调整此大小或任何其他类型的散列表可能是一个相对较慢的操作。如果可能，最好将大小估计值作为可选的initialCapacity构造函数参数提供。另一个可选的loadFactor构造函数参数通过指定在计算给定数量的元素时要分配的空间量时使用的表密度，提供了另一种自定义初始表容量的方法。此外，为了与此类的先前版本兼容，构造函数可以选择将预期的concurrencyLevel指定为内部大小调整的附加提示。请注意，使用具有完全相同hashCode（）的许多键是减慢任何哈希表性能的可靠方法。为了改善影响，当键是可比较时，该类可以使用键之间的比较顺序来帮助打破关系。
+
+可以创建ConcurrentHashMap的Set投影（使用newKeySet（）或newKeySet（int）），或者查看（仅在感兴趣的键时使用keySet（Object），并且映射的值（可能是暂时的）不使用或者全部采用 相同的映射值。
+
+通过使用LongAdder值并通过computeIfAbsent初始化，ConcurrentHashMap可用作可伸缩频率映射（直方图或多集的形式）。 例如，要向ConcurrentHashMap <String，LongAdder> freqs添加计数，可以使用freqs.computeIfAbsent（k - > new LongAdder（））。increment（）;
+
+与Hashtable类似，但与HashMap不同，此类不允许将null用作键或值。
+
+ConcurrentHashMaps支持一组顺序和并行批量操作，与大多数Stream方法不同，它们被设计为安全且通常合理地应用，即使是由其他线程同时更新的映射; 例如，在共享注册表中计算值的快照摘要时。 有三种操作，每种操作有四种形式，接受具有键，值，条目和（键，值）参数和/或返回值的函数。 因为ConcurrentHashMap的元素没有以任何特定的方式排序，并且可以在不同的并行执行中以不同的顺序处理，所提供的函数的正确性不应该依赖于任何排序，或者可能依赖于任何其他可能瞬时变化的对象或值。 计算正在进行中; 除了forEach动作外，理想情况下应该是无副作用的。 Map.Entry对象上的批量操作不支持方法setValue。
+```
+
+常见问题：  
+* ConcurrentHashMap如何实现线程安全？ 为何比HashTable高效?(锁隔离)
+* 同时可以从ConcurrentHashMap读取多个线程吗？
+* 同时可以在ConcurrentHashMap上一个线程读取和其他线程写入吗？
+* ConcurrentHashMap如何在内部工作？
+* 如何在ConcurrentHashMap中原子更新值？
+* 在迭代ConcurrentHashMap时如何删除映射？
+* ConcurrentHashMap的迭代器是否故障安全或故障快速？
+* 如果在ConcurrentHashMap中添加一个新映射，而一个线程正在迭代，会发生什么？
