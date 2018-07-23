@@ -42,7 +42,11 @@ class VolatileExample {
 <center>图2：3、4重排序后旧内存模型中可能的执行顺序</center>   
 在旧的内存模型中，当1和2之间没有数据依赖关系时，1和2之间就可能被重排序（3和4类似）。其结果就是：读线程B执行4时，不一定能看到写线程A在执行1时对共享变量的修改,导致4中读到的值为0。  
 
-在JSR-133中，加强了volatile变量的语义，需要有acquire和release语义。通过此方式在volatile变量的写-读之间建立了happens-before关系。
+在JSR-133中，加强了volatile变量的语义，需要有acquire和release语义。通过此方式在volatile变量的写-读之间建立了happens-before关系。 
+
+volatile关键字通过加入内存屏障之后具有的两个作用：
+* 不允许随意重排序(store-store、load-load、load-store内存屏障)  
+* volatile变量写对于之后的读可见(store-load内存屏障)
 
 通过happens-before关系建立原则，由于flag为volatile变量，所以有2 happens-before 3，由程序顺序原则有 1 happens-before 2， 3 happens-before 4，所以由传递性规则得到1 happens-before 4，所以在writer()方法执行之后，reader()方法中一定可以读取到a变量的值为1，其具体执行顺序图如下：  
 <img src="/img/2018-3-17/newjmmvolatile.jpg" width="500" height="500" alt="新内存模型中volatile" />

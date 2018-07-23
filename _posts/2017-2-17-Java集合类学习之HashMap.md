@@ -20,7 +20,7 @@ _ _ _
 3. HashMap 几种构造方法
 4. HashMap put 及其相关方法
 5. HashMap get 及其相关方法
-6. HashMap remove 及其相关方法（暂未理解透彻）
+6. HashMap remove 及其相关方法  
 7. HashMap 扩容方法　resize()
 
 介绍方法时会包含方法实现相关细节。  

@@ -50,7 +50,7 @@ ReentrantReadWriteLock类可用于提高某些集合的某种用途的并发性�
 下面是一个使用HashMap实现的Cache，通过ReentrantReadWriteLock保证其读写的线程安全性：  
 ```java
 public class Cache {
-	static Map&lt;String, Object&gt; map = new HashMap&lt;String, Object&gt;();
+	static Map<String, Object> map = new HashMap<String, Object>();
 	static ReentrantReadWriteLock rwl = new ReentrantReadWriteLock();
 	static Lock r = rwl.readLock();
 	static Lock w = rwl.writeLock();
@@ -116,7 +116,7 @@ protected final boolean tryAcquire(int acquires) {
     if (c != 0) { // 证明存在锁，但不确定是读锁还是写锁
         // (Note: if c != 0 and w == 0 then shared count != 0)
         // 注意这里的逻辑：一个获取到读锁的线程是不能再获得写锁的
-        if (w == 0 || current != getExclusiveOwnerThread()) // 当前存在的是读锁或者获取到写锁的线程不是当前线程
+        if (w == 0 || current != getExclusiveOwnerThread()) // 当前存在的是读锁或者获取到锁的线程不是当前线程
             return false;
         if (w + exclusiveCount(acquires) > MAX_COUNT) // 写锁被获取的次数已经到达最大(65535)
             throw new Error("Maximum lock count exceeded");
@@ -184,19 +184,8 @@ protected final boolean isHeldExclusively() {
     return getExclusiveOwnerThread() == Thread.currentThread();
 }
 ```
-写锁释放的过程比较简单，每次释放均减少写状态，当写状态为0时表示写锁已被释放，从而等待的读写线程能够继续访问读写锁，同时前次写线程的修改对后续读写线程可见。
-```java
-protected final boolean tryRelease(int releases) {
-    if (!isHeldExclusively())
-        throw new IllegalMonitorStateException();
-    int nextc = getState() - releases;
-    boolean free = exclusiveCount(nextc) == 0;
-    if (free)
-        setExclusiveOwnerThread(null);
-    setState(nextc);
-    return free;
-}
-```  
+写锁释放的过程比较简单，每次释放均减少写状态，当写状态为0时表示写锁已被释放，从而等待的读写线程能够继续访问读写锁，同时前次写线程的修改对后续读写线程可见。  
+  
   
 #### **读锁的获取与释放**
 获取源码分析如下：  

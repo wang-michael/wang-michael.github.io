@@ -7,6 +7,7 @@ header-img: img/post-bg-coffee.jpeg
 catalog: true
 tags:
     - Java基础
+    - 协议
 ---
 
 >本文主要记录了个人在学习网络编程相关知识时遇到的问题及自己的思考，主要用于备忘，错误难免，敬请指出！  
@@ -290,7 +291,7 @@ TCP长连接适用于并发量小、交流频繁、每次传输数据量小的�
     
 (个人理解)由于TCP的保活机制，服务器对于长连接在指定一段时间(一般为2小时)内没有任何交互的情况下才会发送一个探查报文,服务器对于维持一个TCP的长连接流量上消耗应该是不大的。  
 
-更多关于TCP长短连接及TCP保活机制可参考：[TCP长连接与短连接的区别](http://www.cnblogs.com/beifei/archive/2011/06/26/2090611.html)    
+更多关于TCP长短连接及TCP保活机制(受DHCP和NAT Session影响)可参考：[TCP长连接与短连接的区别](http://www.cnblogs.com/beifei/archive/2011/06/26/2090611.html)，[长连接及心跳保活原理简介](https://caofengbin.github.io/2018/03/16/dhcp-and-nat/#%E9%95%BF%E8%BF%9E%E6%8E%A5%E5%8F%8A%E5%BF%83%E8%B7%B3%E4%BF%9D%E6%B4%BB%E5%8E%9F%E7%90%86%E7%AE%80%E4%BB%8B)，[TCP keepalive的探究 (1) : NAT和保活机制](https://blog.chionlab.moe/2016/09/24/linux-tcp-keepalive/)    
 
 **问题：**socket编程中如何为建立的TCP连接指定保活时间?Http的keep-alive如何复用一个TCP连接？  
 
