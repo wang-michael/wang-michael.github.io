@@ -157,7 +157,7 @@ private transient volatile Node<K,V>[] nextTable;
 //节点数组，用于存储键值对，当第一次插入时进行初始化。
 transient volatile Node<K,V>[] table;
 
-private transient volatile CounterCell[] count erCells;// 可方便的计算hashmap中所有元素的个数，性能大大优于jdk1.7中的size()方法
+private transient volatile CounterCell[] counterCells;// 可方便的计算hashmap中所有元素的个数，性能大大优于jdk1.7中的size()方法
 ```
 对于sizeCtl，还需要着重记录一下其作用：
 * 0：默认值
@@ -563,7 +563,7 @@ else {
 ```
 那么至此，有关迁移的几种情况已经介绍完成了，下面我们整体上把控一下整个扩容和迁移过程。  
 
-首先，每个线程进来会先领取自己的任务区间，然后开始 --i 来遍历自己的任务区间，对每个桶进行处理。如果遇到桶的头结点是空的，那么使用 ForwardingNode 标识该桶已经被处理完成了。如果遇到已经处理完成的桶(**为什么会遇到已经处理完成的桶呢？各个线程的处理区间不是互不冲突吗？？？**)，直接跳过进行下一个桶的处理。如果是正常的桶，对桶首节点加锁，正常的迁移即可，迁移结束后依然会将原表的该位置标识位已经处理。  
+首先，每个线程进来会先领取自己的任务区间，然后开始 - - i 来遍历自己的任务区间，对每个桶进行处理。如果遇到桶的头结点是空的，那么使用 ForwardingNode 标识该桶已经被处理完成了。如果遇到已经处理完成的桶(**为什么会遇到已经处理完成的桶呢？各个线程的处理区间不是互不冲突吗？？？**)，直接跳过进行下一个桶的处理。如果是正常的桶，对桶首节点加锁，正常的迁移即可，迁移结束后依然会将原表的该位置标识位已经处理。  
 
 当 i < 0，说明本线程处理速度够快的，整张表的最后一部分已经被它处理完了，现在需要看看是否还有其他线程在自己的区间段还在迁移中。这是退出的逻辑判断部分：
 ```java
@@ -640,7 +640,7 @@ private final void addCount(long x, int check) {
             (a = as[ThreadLocalRandom.getProbe() & m]) == null ||
             !(uncontended =
               U.compareAndSwapLong(a, CELLVALUE, v = a.value, v + x))) {
-             //如果这也失败，说明这个数组元素也被争用了。必须要动粗了
+             //如果这也失败，说明这个数组元素也被争用了,或者当前线程对应的CounterCell尚未被创建。必须要动粗了
              //fullAddCount实现思想同LongAdder，这个类也是1.8加入的。
              //作用就是将x加到counterCells数组中或baseCount中
             fullAddCount(x, uncontended);
@@ -680,36 +680,192 @@ private final void addCount(long x, int check) {
     }
 }
 ```  
-待分析：addCount方法，tryPreSize方法。  
-
-_ _ _
-### **get方法实现**
+接下来重点看下addCount方法中用来计数的部分:  
 ```java
-// get方法整体不加锁
-public V get(Object key) {
-    Node<K,V>[] tab; Node<K,V> e, p; int n, eh; K ek;
-    int h = spread(key.hashCode());
-    if ((tab = table) != null && (n = tab.length) > 0 &&
-        (e = tabAt(tab, (n - 1) & h)) != null) {
-        if ((eh = e.hash) == h) {
-            if ((ek = e.key) == key || (ek != null && key.equals(ek)))
-                return e.val;
-        }
-        else if (eh < 0) //说明该节点位置为红黑树节点
-            return (p = e.find(h, key)) != null ? p.val : null;
-        while ((e = e.next) != null) {
-            if (e.hash == h &&
-                ((ek = e.key) == key || (ek != null && key.equals(ek))))
-                return e.val;
-        }
+//baseCount更新失败，则使用counterCells,调用 fullAddCount 将这些失败的结点包装成一个 CounterCell 对象，保存在 CounterCell 数组中。
+if ((as = counterCells) != null ||
+    !U.compareAndSwapLong(this, BASECOUNT, b = baseCount, s = b + x)) {  //利用CAS操作更新baseCount
+    CounterCell a; long v; int m;
+    //baseCount更新失败,CAS更新CounterCell数组的元素值＋x，uncontended表示更新CounterCell的争用
+    boolean uncontended = true;
+    if (as == null || (m = as.length - 1) < 0 ||
+        (a = as[ThreadLocalRandom.getProbe() & m]) == null ||
+        !(uncontended =
+          U.compareAndSwapLong(a, CELLVALUE, v = a.value, v + x))) {
+         //如果这也失败，说明这个数组元素也被争用了。必须要动粗了
+         //fullAddCount实现思想同LongAdder，这个类也是1.8加入的。
+         //作用就是将x加到counterCells数组中或baseCount中
+        fullAddCount(x, uncontended);
+        return;
     }
-    return null;
+    if (check <= 1)
+        return;
+    //统计元素的个数
+    s = sumCount();
 }
 ```
-如果get时节点hash值为-1怎么办？？？  
+计数的关键便是counterCells属性:
+```java
+private transient volatile CounterCell[] counterCells;
+```
+CounterCell是ConcurrentHashMapd的内部类:
+```java
+@sun.misc.Contended static final class CounterCell {
+    volatile long value;
+    CounterCell(long x) { value = x; }
+}
+```
+这里的计数方式就是改编自LongAdder，以最大程度地降低CAS失败空转的几率。？？？  
 
-_ _ _
-### **size方法实现**
+条件判断:
+```java
+if ((as = counterCells) != null || !U.compareAndSwapLong(this, BASECOUNT, b = baseCount, s = b + x)) {
+    //...
+}
+```
+如果counterCells为null，那么尝试用baseCount进行计数，如果事实上只有一个线程或多个线程单竞争的频率较低，对baseCount的CAS操作并不会失败，所以可以得到结论 : 如果竞争程度较低(没有CAS失败)，那么其实用的是volatile变量baseCount来计数，只有当线程竞争严重(出现CAS失败)时才会改用LongAdder的方式。   
+
+baseCount声明如下:
+```java
+private transient volatile long baseCount;
+```
+再来看一下什么条件下会触发fullAddCount方法:
+```java
+if (as == null || (m = as.length - 1) < 0 || (a = as[ThreadLocalRandom.getProbe() & m]) == null ||
+    !(uncontended = U.compareAndSwapLong(a, CELLVALUE, v = a.value, v + x))) {
+    //...
+}
+```
+我们这里将ThreadLocalRandom.getProbe()的返回值当做一个线程唯一的值即可，其决定了线程和哪一个CounterCell相关联，所以fullAddCount执行的条件是(或):
+* CounterCell数组为null。
+* CounterCell数组大小为0.
+* CounterCell数组线程对应的下标值为null。
+* CAS更新线程特定的CounterCell失败。
+
+接下来就来看fullAddCount方法的执行过程：  
+```java
+private final void fullAddCount(long x, boolean wasUncontended) {
+    int h;
+    if ((h = ThreadLocalRandom.getProbe()) == 0) {
+        ThreadLocalRandom.localInit();      // force initialization
+        h = ThreadLocalRandom.getProbe();
+        wasUncontended = true;
+    }
+    boolean collide = false;                // True if last slot nonempty
+    for (;;) {
+        CounterCell[] as; CounterCell a; int n; long v;
+        //1.
+        if ((as = counterCells) != null && (n = as.length) > 0) {
+            if ((a = as[(n - 1) & h]) == null) {
+                if (cellsBusy == 0) {            // Try to attach new Cell
+                    CounterCell r = new CounterCell(x); // Optimistic create
+                    if (cellsBusy == 0 && U.compareAndSwapInt(this, CELLSBUSY, 0, 1)) {
+                        boolean created = false;
+                        try {               // Recheck under lock
+                            CounterCell[] rs; int m, j;
+                            if ((rs = counterCells) != null &&
+                                (m = rs.length) > 0 &&
+                                rs[j = (m - 1) & h] == null) {
+                                rs[j] = r;
+                                created = true;
+                            }
+                        } finally {
+                            cellsBusy = 0;
+                        }
+                        if (created)
+                            //新Cell创建成功，退出方法
+                            break;
+                        continue;           // Slot is now non-empty
+                    }
+                }
+                collide = false;
+            }
+            else if (!wasUncontended)       // CAS already known to fail
+                wasUncontended = true;      // Continue after rehash
+            else if (U.compareAndSwapLong(a, CELLVALUE, v = a.value, v + x))
+                break;
+            else if (counterCells != as || n >= NCPU)
+                collide = false;            // At max size or stale
+            else if (!collide)
+                collide = true;
+            else if (cellsBusy == 0 && U.compareAndSwapInt(this, CELLSBUSY, 0, 1)) {
+                try {
+                    //扩容
+                    if (counterCells == as) {// Expand table unless stale
+                        CounterCell[] rs = new CounterCell[n << 1];
+                        for (int i = 0; i < n; ++i)
+                            rs[i] = as[i];
+                        counterCells = rs;
+                    }
+                } finally {
+                    cellsBusy = 0;
+                }
+                collide = false;
+                continue;                   // Retry with expanded table
+            }
+            //rehash
+            h = ThreadLocalRandom.advanceProbe(h); // 当Cell数组不为null和empty时，每次循环便会导致重新哈希值，这样做的目的是用再次生成哈希值的方式降低线程竞争。
+        }
+        //2.
+        else if (cellsBusy == 0 && counterCells == as && U.compareAndSwapInt(this, CELLSBUSY, 0, 1)) {
+            boolean init = false;
+            try {
+                //获得锁之后再次检测是否已被初始化
+                if (counterCells == as) {
+                    CounterCell[] rs = new CounterCell[2];
+                    rs[h & 1] = new CounterCell(x);
+                    counterCells = rs;
+                    init = true;
+                }
+            } finally {
+                //锁释放
+                cellsBusy = 0;
+            }
+            if (init)
+                //计数成功，退出方法
+                break;
+        }
+      //3. 
+        else if (U.compareAndSwapLong(this, BASECOUNT, v = baseCount, v + x))
+            break;                          // Fall back on using base
+    }
+}
+```  
+从源码中可以看出，在初始情况下probe其实是0的，也就是说在一开始的时候都是更新到第一个cell中的，直到出现CAS失败。  
+
+整个方法的逻辑较为复杂，我们按照上面列出的fullAddCount执行条件进行对应说明。  
+
+**cell数组为null或empty**
+容易看出，这里对应的是fullAddCount方法的源码2处。cellBusy的定义如下:  
+```java
+private transient volatile int cellsBusy;
+```
+这里其实将其当做锁来使用，即只允许在某一时刻只有一个线程正在进行CounterCell数组的初始化或扩容，其值为1说明有线程正在进行上述操作。  
+
+默认创建了大小为2的CounterCell数组。  
+
+**下标为null或CAS失败**
+这里便对应源码的1处，各种条件分支不再展开详细描述，注意以下几点:  
+1. rehash:当Cell数组不为null和empty时，每次循环便会导致重新哈希值，这样做的目的是用再次生成哈希值的方式降低线程竞争。
+2. 最大CounterCell数:取NCPU
+```java
+static final int NCPU = Runtime.getRuntime().availableProcessors();
+```
+不过从上面扩容部分源码可以看出，最大值并不一定是NCPU，因为采用的是2倍扩容，准确来说是最小的大于等于NCPU的2的整次幂(初始大小为2)。（这里非常精彩了，根据机器核心数判断最大的并发更新线程数，避免了CounterCell数组的无限扩张浪费空间）  
+
+注意下面这个分支:  
+```java
+else if (counterCells != as || n >= NCPU)
+    collide = false;
+```
+此分支会将collide置为false，从而致使下次循环else if (!collide)必定得到满足，这也就保证了扩容分支不会被执行。  
+
+**baseCount分支**
+什么时候会执行到这个分支呢？？？  
+
+**最后记录下我对CounterCell数组设立目的的理解：CounterCells数组设立是为了配合baseCount变量统计Map中元素数量用的。单纯使用baseCount一个变量也可以完成统计功能，只不过可能出现多线程同时更新baseCount失败导致baseCount成为并发性能瓶颈。因此根据机器核心数量设置了CounterCells数组，当线程更新baseCount数量失败的时候，还可以更新CountCells数组中与其对应的CounterCell的value，减少了高并发情况下更新baseCount变量产生的冲突。统计Map中元素数量的时候，只需要将baseCount与CounterCells中所有元素的value值相加即可。**    
+
+size方法实现如下：  
 ```java
 public int size() {
     long n = sumCount();  //调用内部sumCount方法
@@ -731,6 +887,32 @@ final long sumCount() {
 }
 ```
 
-(完)
-参考文章：
-[为并发而生的 ConcurrentHashMap（Java 8）](https://www.jianshu.com/p/e99e3fcface4)  
+_ _ _
+### **get方法实现**
+```java
+// get方法整体不加锁
+public V get(Object key) {
+    Node<K,V>[] tab; Node<K,V> e, p; int n, eh; K ek;
+    int h = spread(key.hashCode());
+    if ((tab = table) != null && (n = tab.length) > 0 &&
+        (e = tabAt(tab, (n - 1) & h)) != null) {
+        if ((eh = e.hash) == h) {
+            if ((ek = e.key) == key || (ek != null && key.equals(ek)))
+                return e.val;
+        }
+        else if (eh < 0) //说明该节点位置为红黑树节点，或者是ForwardingNode
+            return (p = e.find(h, key)) != null ? p.val : null;
+        while ((e = e.next) != null) {
+            if (e.hash == h &&
+                ((ek = e.key) == key || (ek != null && key.equals(ek))))
+                return e.val;
+        }
+    }
+    return null;
+}
+```
+
+(完)  
+参考文章：  
+[为并发而生的 ConcurrentHashMap（Java 8）](https://www.jianshu.com/p/e99e3fcface4)   
+[concurrenthashmap分析(1.8版本)](https://github.com/seaswalker/JDK/blob/master/note/ConcurrentHashMap/concurrenthashmap.md)  
