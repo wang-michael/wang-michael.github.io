@@ -401,3 +401,187 @@ ConcurrentHashMaps支持一组顺序和并行批量操作，与大多数Stream�
 * 如果在ConcurrentHashMap中添加一个新映射，而一个线程正在迭代，会发生什么？
 
 
+###ConcurrentLinkedQueue
+---
+API文档翻译:
+```java
+基于链接节点的无界线程安全队列。 此队列命令元素FIFO（先进先出）。 队列的头部是队列中最长时间的元素。 队列的尾部是队列中最短时间的元素。 在队列的尾部插入新元素，队列检索操作获取队列头部的元素。 当许多线程共享对公共集合的访问权限时，ConcurrentLinkedQueue是一个合适的选择。 与大多数其他并发集合实现一样，此类不允许使用null元素。
+
+该实现采用有效的非阻塞算法，该算法基于Maged M.Michael和Michael L.Scott的简单，快速，实用的非阻塞和阻塞并发队列算法中描述的算法。
+
+迭代器是弱一致的，在迭代器创建时或之后的某个时刻返回反映队列状态的元素。它们不会抛出ConcurrentModificationException，并且可能与其他操作同时进行。自创建迭代器以来队列中包含的元素将只返回一次。
+
+请注意，与大多数集合不同，size方法不是恒定时间操作。由于这些队列的异步性质，确定元素的当前数量需要遍历元素，因此如果在遍历期间修改此集合，则可能会报告不准确的结果。此外，批量操作addAll，removeAll，retainAll，containsAll，equals和toArray不保证以原子方式执行。例如，与addAll操作同时运行的迭代器可能只查看一些添加的元素。
+
+该类及其迭代器实现了Queue和Iterator接口的所有可选方法。
+
+内存一致性影响：与其他并发集合一样，在将对象放入ConcurrentLinkedQueue之前，线程中的操作发生在从另一个线程中的ConcurrentLinkedQueue访问或删除该元素之后的操作之前。
+
+此类是Java Collections Framework的成员。  
+```
+Michael-Scott 非阻塞队列算法中的插入:  
+```java
+public class LinkedQueue <E> {
+    private static class Node <E> {
+        final E item;
+        final AtomicReference<Node<E>> next;
+        Node(E item, Node<E> next) {
+            this.item = item;
+            this.next = new AtomicReference<Node<E>>(next);
+        }
+    }
+    private AtomicReference<Node<E>> head
+        = new AtomicReference<Node<E>>(new Node<E>(null, null));
+    private AtomicReference<Node<E>> tail = head;
+    public boolean put(E item) {
+        Node<E> newNode = new Node<E>(item, null);
+        while (true) {
+            Node<E> curTail = tail.get();
+            Node<E> residue = curTail.next.get();
+            if (curTail == tail.get()) {
+                if (residue == null) /* A */ {
+                    if (curTail.next.compareAndSet(null, newNode)) /* C */ {
+                        tail.compareAndSet(curTail, newNode) /* D */ ;
+                        return true;
+                    }
+                } else {
+                    tail.compareAndSet(curTail, residue) /* B */;
+                }
+            }
+        }
+    }
+}
+```
+[非阻塞算法简介](https://www.ibm.com/developerworks/cn/java/j-jtp04186/)   
+
+### BlockingQueue及其子类
+---
+
+### CopyOnWriteArrayList
+---
+
+add方法： 
+```java
+public boolean add(E e) {
+    final ReentrantLock lock = this.lock;
+    lock.lock();
+    try {
+        Object[] elements = getArray();
+        int len = elements.length;
+        Object[] newElements = Arrays.copyOf(elements, len + 1);
+        newElements[len] = e;
+        setArray(newElements);
+        return true;
+    } finally {
+        lock.unlock();
+    }
+}
+```
+get方法:
+```java
+public E get(int index) {
+    return get(getArray(), index);
+}
+
+@SuppressWarnings("unchecked")
+private E get(Object[] a, int index) {
+    return (E) a[index];
+}
+```
+setArray与getArray：
+```java
+final Object[] getArray() {
+    return array;
+}
+final void setArray(Object[] a) {
+    array = a;
+}
+```
+remove：
+```java
+public E remove(int index) {
+    final ReentrantLock lock = this.lock;
+    lock.lock();
+    try {
+        Object[] elements = getArray();
+        int len = elements.length;
+        E oldValue = get(elements, index);
+        int numMoved = len - index - 1;
+        if (numMoved == 0)
+            setArray(Arrays.copyOf(elements, len - 1));
+        else {
+            Object[] newElements = new Object[len - 1];
+            System.arraycopy(elements, 0, newElements, 0, index);
+            System.arraycopy(elements, index + 1, newElements, index,
+                             numMoved);
+            setArray(newElements);
+        }
+        return oldValue;
+    } finally {
+        lock.unlock();
+    }
+}
+```
+iterator:
+```java
+
+```
+
+
+### Fork-join框架原理分析
+---
+待完成。  
+
+### ThreadPoolExecutor原理分析
+---
+API文档翻译：  
+```java
+一个ExecutorService的实现，它使用可能的几个池化线程执行每个提交的任务，通常使用Executors工厂方法配置。
+
+线程池解决了两个不同的问题：它们通常在执行大量异步任务时提供改进的性能，这是由于减少了每个任务的调用开销，并且它们提供了一种绑定和管理资源的方法，包括执行集合时所消耗的线程。 任务。 每个ThreadPoolExecutor还维护一些基本统计信息，例如已完成任务的数量。
+
+为了在各种上下文中有用，该类提供了许多可调参数和可扩展性钩子方法。 但是，程序员被要求使用更方便的Executors工厂方法Executors.newCachedThreadPool（）（无界线程池，具有自动线程回收），Executors.newFixedThreadPool（int）（固定大小线程池）和Executors.newSingleThreadExecutor（）（单个背景） thread），为最常见的使用场景预配置设置。 否则，在手动配置和调整此类时，请使用以下指南：
+
+。。。
+
+此类的大多数扩展都会覆盖一个或多个受保护的钩子方法。 例如，这是一个添加简单暂停/恢复功能的子类：
+
+class PausableThreadPoolExecutor extends ThreadPoolExecutor {
+   private boolean isPaused;
+   private ReentrantLock pauseLock = new ReentrantLock();
+   private Condition unpaused = pauseLock.newCondition();
+
+   public PausableThreadPoolExecutor(...) { super(...); }
+
+   protected void beforeExecute(Thread t, Runnable r) {
+     super.beforeExecute(t, r);
+     pauseLock.lock();
+     try {
+       while (isPaused) unpaused.await();
+     } catch (InterruptedException ie) {
+       t.interrupt();
+     } finally {
+       pauseLock.unlock();
+     }
+   }
+
+   public void pause() {
+     pauseLock.lock();
+     try {
+       isPaused = true;
+     } finally {
+       pauseLock.unlock();
+     }
+   }
+
+   public void resume() {
+     pauseLock.lock();
+     try {
+       isPaused = false;
+       unpaused.signalAll();
+     } finally {
+       pauseLock.unlock();
+     }
+   }
+ }
+```

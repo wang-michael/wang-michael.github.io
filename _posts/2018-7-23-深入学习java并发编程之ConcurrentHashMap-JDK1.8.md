@@ -886,6 +886,7 @@ final long sumCount() {
     return sum;  
 }
 ```
+与JDK1.7相比，size方法高效了许多，不需要对Map整个加锁后分段进行统计。  
 
 _ _ _
 ### **get方法实现**
