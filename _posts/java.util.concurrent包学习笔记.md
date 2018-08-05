@@ -527,10 +527,305 @@ iterator:
 
 ```
 
-
 ### Fork-join框架原理分析
 ---
-待完成。  
+Fork/Join框架是Java 7提供的一个用于并行执行任务的框架，是一个把大任务分割成若干个小任务，最终汇总每个小任务结果后得到大任务结果的框架。类似于Map-Reduce思想，我们只需要在覆盖的方法中分割任务及汇总结果即可。
+
+ForkJoin框架要求分割出的子任务之间互不相关，这恰好是分治思想的要求，所以某种程度上可以把 Fork/Join 模式看作并行版本的 Divide and Conquer 策略，仅仅关注如何划分任务和组合中间结果，将剩下的事情丢给 Fork/Join 框架。  
+
+Demo实现如下：  
+```java
+public class CountTask extends RecursiveTask<Integer> {
+
+    private static final int THRESHOLD = 2;
+    private int start;
+    private int end;
+
+    @Override
+    protected Integer compute() {
+        int sum = 0;
+
+        boolean canCompute = (end - start) <= THRESHOLD;
+        if (canCompute) {
+            for (int i = start; i <= end; i++) {
+                sum += i;
+            }
+        } else {
+            int middle = (start + end) / 2;
+            CountTask leftTask = new CountTask(start, middle);
+            CountTask rightTask = new CountTask(middle + 1, end);
+            // ForkJoinPool内部采用什么策略将任务分配到不同工作线程的工作队列中的呢？？？
+            leftTask.fork(); // 向其内部工作队列中添加新的任务
+            rightTask.fork();
+            // 如何做到阻塞直到两个分割后的任务执行完才继续向下执行呢？？？有可能是当前工作线程在join方法中停止执行当前任务，
+            // 而是执行刚刚提交的leftTask
+            int leftResult = leftTask.join();
+            int rightResult = rightTask.join();
+            sum = leftResult + rightResult;
+        }
+        return sum;
+    }
+
+    public CountTask(int start, int end) {
+        this.start = start;
+        this.end = end;
+    }
+    
+    /**
+     * ForkJoinPool 使用submit 或 invoke 提交的区别：invoke是同步执行，调用之后需要等待任务完成，才能执行后面的代码；submit是
+     * 异步执行，只有在Future调用get的时候会阻塞。
+     */
+    public static void main(String[] args) throws ExecutionException, InterruptedException {
+        ForkJoinPool forkJoinPool = new ForkJoinPool();
+        CountTask task = new CountTask(1, 4);
+        Future<Integer> result = forkJoinPool.submit(task);
+        Future<Integer> result1 = forkJoinPool.submit(task);
+        System.out.println(result.get());
+        System.out.println(result1.get());
+    }
+}
+```
+
+上面的代码可以改进的地方是：  执行子任务调用fork方法并不是最佳的选择，最佳的选择是invokeAll方法。
+```java
+leftTask.fork(); rightTask.fork(); 
+替换为 invokeAll(leftTask, rightTask);
+```
+对于Fork/Join模式，假如Pool里面线程数量是固定的，那么调用子任务的fork方法相当于A先分工给B，然后A当监工不干活，B去完成A交代的任务。所以上面的模式相当于浪费了一个线程。那么如果使用invokeAll相当于A分工给B后，A和B都去完成工作。这样可以更好的利用线程池，缩短执行的时间。  
+
+Fork-Join内部实现原理可以简单理解为：ForkJoinPool内部有多个工作线程ForkJoinWorkerThread，每个工作线程维护一个自己的工作队列，处理其中的任务，ForkJoinPool负责将提交的任务分配给不同的工作线程；
+
+ForkJoin也是线程池的实现之一，其父类是AbstractExecutorService，它与ThreadPoolExecutor同级。  
+
+**工作窃取算法：即某个线程从其它队列中窃取任务来执行。**为什么要使用这个算法呢？？？假如我们需要处理一个比较大的任务，可以把这个任务分割为若干个互不依赖的子任务，为了减少线程间的竞争，把这些子任务分别放到不同的队列里，并为每个队列创建一个单独的线程来执行队列中的任务，线程与队列一一对应，比如A线程负责处理A队列里的任务。但是有的线程会先把自己队列里的任务干完，而其他线程的工作队列里还有任务等待处理，干完活的线程与其等着，不如去帮其他线程干活，于是他就去其他线程的工作队列里窃取一个任务来执行。而在这是就出现了多个线程访问同一个工作队列的情况，为了减少窃取任务的线程和被窃取任务的线程之间的竞争，通常会使用双端队列，被窃取任务的线程永远从双端队列头部拿任务执行，而窃取任务的线程永远从双端队列的尾部拿任务执行。   
+
+使用Fork-Join时，如果任务层次划分的很深，一直得不到返回，可能出现两种情况：第一、系统内线程数量越积越多，导致性能严重下降。第二、函数的调用层次变的很深，最终导致栈溢出。不同版本的JDK内部实现机制可能有差异，从而导致其表现不同。比如在JDK8中就可能抛出StackOverflowError。  
+
+此外，ForkJoin线程池使用一个无锁的栈来管理空闲线程。如果一个工作线程暂时取不到可用的任务，则可能会被挂起，挂起的线程将会被压入由线程池维护的栈中。将来有任务可用时，再从栈中唤醒这些线程。  
+
+**使用Fork-Join实现并行快排示例：**  
+```java
+package tests;
+ 
+import static org.junit.Assert.*;
+ 
+import java.util.Arrays;
+import java.util.Random;
+import java.util.concurrent.TimeUnit;
+ 
+import jsr166y.forkjoin.ForkJoinPool;
+import jsr166y.forkjoin.ForkJoinTask;
+import jsr166y.forkjoin.RecursiveAction;
+ 
+import org.junit.Before;
+import org.junit.Test;
+ 
+class SortTask extends RecursiveAction {
+    final long[] array;
+    final int lo;
+    final int hi;
+    private int THRESHOLD = 0; //For demo only
+ 
+    public SortTask(long[] array) {
+        this.array = array;
+        this.lo = 0;
+        this.hi = array.length - 1;
+    }
+ 
+    public SortTask(long[] array, int lo, int hi) {
+        this.array = array;
+        this.lo = lo;
+        this.hi = hi;
+    }
+ 
+    protected void compute() {
+        if (hi - lo < THRESHOLD)
+            sequentiallySort(array, lo, hi);
+        else {
+            int pivot = partition(array, lo, hi);
+            System.out.println("\npivot = " + pivot + ", low = " + lo + ", high = " + hi);
+            System.out.println("array" + Arrays.toString(array));
+            coInvoke(new SortTask(array, lo, pivot - 1), new SortTask(array,
+                    pivot + 1, hi));
+        }
+    }
+ 
+    private int partition(long[] array, int lo, int hi) {
+        long x = array[hi];
+        int i = lo - 1;
+        for (int j = lo; j < hi; j++) {
+            if (array[j] <= x) {
+                i++;
+                swap(array, i, j);
+            }
+        }
+        swap(array, i + 1, hi);
+        return i + 1;
+    }
+ 
+    private void swap(long[] array, int i, int j) {
+        if (i != j) {
+            long temp = array[i];
+            array[i] = array[j];
+            array[j] = temp;
+        }
+    }
+ 
+    private void sequentiallySort(long[] array, int lo, int hi) {
+        Arrays.sort(array, lo, hi + 1);
+    }
+}
+ 
+public class TestForkJoinSimple {
+    private static final int NARRAY = 16; //For demo only
+    long[] array = new long[NARRAY];
+    Random rand = new Random();
+ 
+    @Before
+    public void setUp() {
+        for (int i = 0; i < array.length; i++) {
+            array[i] = rand.nextLong()%100; //For demo only
+        }
+        System.out.println("Initial Array: " + Arrays.toString(array));
+    }
+ 
+    @Test
+    public void testSort() throws Exception {
+        ForkJoinTask sort = new SortTask(array);
+        ForkJoinPool fjpool = new ForkJoinPool();
+        fjpool.submit(sort);
+        fjpool.shutdown();
+ 
+        fjpool.awaitTermination(30, TimeUnit.SECONDS);
+ 
+        assertTrue(checkSorted(array));
+    }
+ 
+    boolean checkSorted(long[] a) {
+        for (int i = 0; i < a.length - 1; i++) {
+            if (a[i] > (a[i + 1])) {
+                return false;
+            }
+        }
+        return true;
+    }
+}
+
+```
+
+
+API文档翻译：  
+```java
+
+```
+从submit一个任务的过程开始分析：  
+```java
+public <T> ForkJoinTask<T> submit(ForkJoinTask<T> task) {
+    if (task == null)
+        throw new NullPointerException();
+    externalPush(task);
+    return task;
+}
+final void externalPush(ForkJoinTask<?> task) {
+    WorkQueue[] ws; WorkQueue q; int m;
+    int r = ThreadLocalRandom.getProbe();
+    int rs = runState;
+    if ((ws = workQueues) != null && (m = (ws.length - 1)) >= 0 &&
+        (q = ws[m & r & SQMASK]) != null && r != 0 && rs > 0 &&
+        U.compareAndSwapInt(q, QLOCK, 0, 1)) {
+        ForkJoinTask<?>[] a; int am, n, s;
+        if ((a = q.array) != null &&
+            (am = a.length - 1) > (n = (s = q.top) - q.base)) {
+            int j = ((am & s) << ASHIFT) + ABASE;
+            U.putOrderedObject(a, j, task);
+            U.putOrderedInt(q, QTOP, s + 1);
+            U.putIntVolatile(q, QLOCK, 0);
+            if (n <= 1)
+                signalWork(ws, q);
+            return;
+        }
+        U.compareAndSwapInt(q, QLOCK, 1, 0);
+    }
+    externalSubmit(task);
+}
+private void externalSubmit(ForkJoinTask<?> task) {
+    int r;                                    // initialize caller's probe
+    if ((r = ThreadLocalRandom.getProbe()) == 0) {
+        ThreadLocalRandom.localInit();
+        r = ThreadLocalRandom.getProbe();
+    }
+    for (;;) {
+        WorkQueue[] ws; WorkQueue q; int rs, m, k;
+        boolean move = false;
+        if ((rs = runState) < 0) {
+            tryTerminate(false, false);     // help terminate
+            throw new RejectedExecutionException();
+        }
+        else if ((rs & STARTED) == 0 ||     // initialize
+                 ((ws = workQueues) == null || (m = ws.length - 1) < 0)) {
+            int ns = 0;
+            rs = lockRunState();
+            try {
+                if ((rs & STARTED) == 0) {
+                    U.compareAndSwapObject(this, STEALCOUNTER, null,
+                                           new AtomicLong());
+                    // create workQueues array with size a power of two
+                    int p = config & SMASK; // ensure at least 2 slots
+                    int n = (p > 1) ? p - 1 : 1;
+                    n |= n >>> 1; n |= n >>> 2;  n |= n >>> 4;
+                    n |= n >>> 8; n |= n >>> 16; n = (n + 1) << 1;
+                    workQueues = new WorkQueue[n];
+                    ns = STARTED;
+                }
+            } finally {
+                unlockRunState(rs, (rs & ~RSLOCK) | ns);
+            }
+        }
+        else if ((q = ws[k = r & m & SQMASK]) != null) {
+            if (q.qlock == 0 && U.compareAndSwapInt(q, QLOCK, 0, 1)) {
+                ForkJoinTask<?>[] a = q.array;
+                int s = q.top;
+                boolean submitted = false; // initial submission or resizing
+                try {                      // locked version of push
+                    if ((a != null && a.length > s + 1 - q.base) ||
+                        (a = q.growArray()) != null) {
+                        int j = (((a.length - 1) & s) << ASHIFT) + ABASE;
+                        U.putOrderedObject(a, j, task);
+                        U.putOrderedInt(q, QTOP, s + 1);
+                        submitted = true;
+                    }
+                } finally {
+                    U.compareAndSwapInt(q, QLOCK, 1, 0);
+                }
+                if (submitted) {
+                    signalWork(ws, q);
+                    return;
+                }
+            }
+            move = true;                   // move on failure
+        }
+        else if (((rs = runState) & RSLOCK) == 0) { // create new queue
+            q = new WorkQueue(this, null);
+            q.hint = r;
+            q.config = k | SHARED_QUEUE;
+            q.scanState = INACTIVE;
+            rs = lockRunState();           // publish index
+            if (rs > 0 &&  (ws = workQueues) != null &&
+                k < ws.length && ws[k] == null)
+                ws[k] = q;                 // else terminated
+            unlockRunState(rs, rs & ~RSLOCK);
+        }
+        else
+            move = true;                   // move if busy
+        if (move)
+            r = ThreadLocalRandom.advanceProbe(r);
+    }
+}
+```
+参考文章：  
+[并发之Fork/Join框架使用及注意点](https://www.imooc.com/article/24822) 
+[JDK 7 中的 Fork/Join 模式](https://www.ibm.com/developerworks/cn/java/j-lo-forkjoin/index.html) 
+[Java 理论与实践-应用 fork-join 框架](https://www.ibm.com/developerworks/cn/java/j-jtp11137.html) 
 
 ### ThreadPoolExecutor原理分析
 ---
@@ -585,3 +880,67 @@ class PausableThreadPoolExecutor extends ThreadPoolExecutor {
    }
  }
 ```
+
+### ScheduledThreadPoolExecutor原理分析
+---
+API文档翻译：
+```java
+ScheduledThreadPoolExecutor可以使得提交的任务在给定的延迟时间之后执行或者周期性执行。当需要更多的工作线程的时候，这个类相比于Timer来说使用起来更加合适。  
+
+延时任务在enable之后可以被立即execute，但是究竟过多长时间被execute是不能被保证的。TASK执行的顺序是按照enable时的时间排出的先进先出的顺序来决定的。  
+
+提交的任务在运行之前(是指enable之前还是enable之后被执行之前)被取消时，这个任务将不会被执行。 默认情况下，此类已取消的任务不会自动从工作队列中删除，直到其延迟时间过去。 虽然这可以进一步检查和监控，但也可能导致取消任务的无限制保留。 要避免这种情况，请将setRemoveOnCancelPolicy（boolean）设置为true，这会导致在取消时立即从工作队列中删除任务。
+
+通过scheduleAtFixedRate或scheduleWithFixedDelay计划的任务的连续执行不会重叠。 虽然不同的任务的execute可能被不同的线程完成，但是先前执行的效果happens-before在后续执行的效果。
+
+虽然这个类继承自ThreadPoolExecutor，但是一些继承的调优方法对它没用。 特别是，因为它使用corePoolSize线程和无界队列作为固定大小的池，所以对maximumPoolSize的调整没有任何有用的效果。 此外，将corePoolSize设置为零或使用allowCoreThreadTimeOut几乎绝不是一个好主意，因为一旦它们有资格运行，这可能会使池没有线程来处理任务。
+```
+使用Demo：
+```java
+public class ThreadPoolStudy {
+
+    public static void main(String[] args) {
+        // ScheduledExecutorService可以使任务 定期或延时 执行
+        ScheduledExecutorService executor =  (ScheduledThreadPoolExecutor) Executors.newScheduledThreadPool(10);
+        for (int i = 0; i <= 5; i++)
+        {
+            Task task = new Task("Task " + i);
+            System.out.println("A new task has been added : " + task.getName());
+            // 让提交的任务在等待指定时间之后才有资格被选中执行
+            executor.schedule(task, i * 3, TimeUnit.SECONDS);
+        }
+        executor.shutdown();
+    }
+
+    static class Task implements Runnable
+    {
+        private String name;
+
+        public Task(String name)
+        {
+            this.name = name;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        @Override
+        public void run()
+        {
+            try
+            {
+                Long duration = (long) (Math.random() * 2);
+                System.out.println("Doing a task during : " + name);
+                TimeUnit.SECONDS.sleep(duration);
+            }
+            catch (InterruptedException e)
+            {
+                e.printStackTrace();
+            }
+        }
+    }
+}
+```
+
+### AIO学习待完成
