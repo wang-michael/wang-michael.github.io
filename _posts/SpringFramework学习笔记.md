@@ -1,4 +1,7 @@
 # SpringFramework学习笔记
+待读：黄勇《架构探险-从零开始写Java Web框架》
+看源码-》深入理解其功能实现-》学习其设计理念和设计模式，从宏观-》微观
+
 ## 一、Spring IOC容器实现部分学习
 1. org.springframework.beans 和 org.springframework.context 包是 Spring Framework 的 IoC 容器的根本
 2. 有两个主要的容器系列，一个是实现BeanFactory接口的简单容器系列，这系列容器只实现了容器的最基本功能；另一个是ApplicationContext应用上下文，它作为容器的高级形态而存在。ApplicationContext 是 BeanFactory 的一个子接口。ApplicationContext 使得和 Spring 的AOP 功能集成变得更简单；添加了信息资源处理（国际化中使用），事件发布；还添加了应用程序层的特殊上下文 ，如用于 web 应用程序的 WebApplicationContext。**简而言之，BeanFactory提供了配置框架和基本功能，而ApplicationContext 添加了更多企业应用功能。**
@@ -9,6 +12,7 @@
 * 在创建各种Bean的时候如何处理Bean间各种依赖关系？如何做到以xml、注解、javaconfig等多种方式读入Bean？
 * Spring中BeanFactory的生命周期、Bean的生命周期、各种作用域区分、作用于Bean各个作用域的回调函数使用
 * Spring容器级别回调使用及实现，比如BeanPostProcessor、BeanFactoryPostProcessor
+* Spring事件处理机制(接口ApplicationEventPublisher)
 
 ### Bean生命周期回调
 Bean生命周期图示参见《Spring实战》20页。
@@ -84,6 +88,9 @@ ApplicationContext的实现类其实是包装了DefaultListableBeanFactory类，
 
 <img src="/img/otherblog/BeanFactoryAndApplicationContextContrast.png" width="700" height="700" alt="BeanFactory与ApplicationContext对比图" />
 <center>BeanFactory与ApplicationContext对比图</center>    
+
+<img src="/img/otherblog/BeanFactoryAndApplicationContextContrast1.png" width="700" height="700" alt="BeanFactory与ApplicationContext类图对比" />
+<center>BeanFactory与ApplicationContext类图对比</center>    
 
 ## 二、Spring AOP实现部分学习
 **学完这部分之后要解决的问题：** 
