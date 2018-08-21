@@ -1147,15 +1147,16 @@ public abstract class AbstractAutoProxyCreator extends ProxyConfig
 	}
 }
 ```
-可见正是通过上面的过程判断是否需要对目标对象进行代理(如果需要代理就使用ProxyFactory方式生成)，从而实现AOP功能的。
+可见正是通过上面的过程判断是否需要对目标对象进行代理(如果需要代理就使用ProxyFactory方式生成)，从而实现AOP功能的。 
 
 (完)  
 
 参考文章：  
 《Spring技术内幕》  
-[BeanPostProcessor —— 连接Spring IOC和AOP的桥梁](http://www.cnblogs.com/yuxiang1/archive/2018/06/19/9199730.html)
+[BeanPostProcessor —— 连接Spring IOC和AOP的桥梁](http://www.cnblogs.com/yuxiang1/archive/2018/06/19/9199730.html)  
+[Spring 4.3 源码分析之 Aop 组件概述](https://www.jianshu.com/p/de624a4190c6)  
   
 
 
 
-待完成：SpringAOP整个设计类图意图分析，SpringAOP官方文档学习  
+

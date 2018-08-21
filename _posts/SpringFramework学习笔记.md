@@ -126,12 +126,21 @@ Spring AOP的实现和其他特性的实现一样，除了可以使用Spring本�
 **学完这部分之后要解决的问题：** 
 * Spring AOP带来的好处
 * Spring AOP几种配置方式
-* Spring AOP实现原理(JDK动态代理、CGLIB) 
+* Spring AOP实现原理(JDK动态代理、CGLIB) 两种方式具体区别在哪？？？  
+* 待完成：SpringAOP整个设计类图意图分析，SpringAOP官方文档学习  
 
 
 ## 三、Spring MVC实现部分学习及servlet知识再总结
+**学完这部分之后要解决的问题：** 
+* Spring MVC 应用上下文(WebApplicationContext)在web中的启动与销毁
+* Spring MVC DispatcherServlet启动与销毁
+* Spring MVC 请求处理流程，涉及的mvc框架组件，应用的设计模式
 
 ## 四、Spring JDBCTemplate及Mybatis适配实现部分学习
 
 ## 五、Spring 事务控制实现部分学习
+
+
+## 代码分析心得
+以组件的方式对每种框架进行分析。从Demo开始进行分析。    
 
