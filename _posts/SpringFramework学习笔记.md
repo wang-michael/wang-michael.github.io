@@ -135,6 +135,7 @@ Spring AOP的实现和其他特性的实现一样，除了可以使用Spring本�
 * Spring MVC 应用上下文(WebApplicationContext)在web中的启动与销毁
 * Spring MVC DispatcherServlet启动与销毁
 * Spring MVC 请求处理流程，涉及的mvc框架组件，应用的设计模式
+* struts2是如何与Spring结合到一起的？？？  
 
 ## 四、Spring JDBCTemplate及Mybatis适配实现部分学习
 
