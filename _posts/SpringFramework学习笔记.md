@@ -138,6 +138,20 @@ Spring AOP的实现和其他特性的实现一样，除了可以使用Spring本�
 * struts2是如何与Spring结合到一起的？？？  
 
 ## 四、Spring JDBCTemplate及Mybatis适配实现部分学习
+### Java原生JDBC部分
+Java原生JDBC：java访问数据库的基石，其它框架如Hibernate、MyBatis等ORM只是更好的封装了Jdbc。
+  
+待解决问题：
+* JDBC如何实现Java程序和JDBC驱动松耦合
+* 如何创建一个JDBC连接
+* JDBC的DriverManager是用来做什么的
+* JDBC三种statement各自区别、功能
+* JDBC中批处理好处
+* JDBC事务控制：提交、回滚、隔离级别
+
+参考文章：[JDBC常见面试题](https://segmentfault.com/a/1190000013312766)  
+
+
 
 ## 五、Spring 事务控制实现部分学习
 

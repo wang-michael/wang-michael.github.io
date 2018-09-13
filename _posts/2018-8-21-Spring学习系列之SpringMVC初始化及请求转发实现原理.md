@@ -1,6 +1,6 @@
 ---
 layout:     post
-title:      Spring学习系列之SpringMVC初始化
+title:      Spring学习系列之SpringMVC初始化及请求转发实现原理
 date:       2018-8-21
 author:     W-M
 header-img: img/post-bg-coffee.jpeg
@@ -125,7 +125,7 @@ public class ContextLoader {
 }
 ```
 ContextLoader.initWebApplicationContext方法中完成了两个IOC容器建立的基本过程，一个是在Web容器中建立起双亲IOC容器，另一个是生成相应的WebApplicationContext并将其初始化。在继续向下分析之前，先来看下WebApplicationContext接口的类层次关系：  
-<img src="/img/2018-8-21/WebApplicationContextExtends.png" width="700" height="700" alt="WebApplicationContextExtends" />
+<img src="/img/2018-8-21/WebApplicationContextExtends.png" width="500" height="500" alt="WebApplicationContextExtends" />
 <center>图1：WebApplicationContext接口类层次关系</center>
 
 接下来看创建WebApplicationContext的createWebApplicationContext方法：  
@@ -359,7 +359,7 @@ public class ContextLoader {
 _ _ _
 ### **DispatcherServlet 初始化**
 DispatcherServlet是一个Servlet，Tomcat容器启动时会调用它的init方法对其进行初始化，先来看一下DispatcherServlet的继承类图：
-<img src="/img/2018-8-21/DispatcherServletExtendsUML.png" width="700" height="700" alt="DispatcherServletExtendsUML" />
+<img src="/img/2018-8-21/DispatcherServletExtendsUML.png" width="500" height="500" alt="DispatcherServletExtendsUML" />
 <center>图2：DispatcherServlet继承类图</center>
 
 现在我们就从这个init方法开始进行分析：  
@@ -1536,7 +1536,7 @@ _ _ _
 
 之后分析了DispatcherServlet初始化的过程，在这个过程中，它以根WebApplicationContext作为父容器建立了子容器，并通过监听ContextRefreshedEvent获取相应HandlerMapping实例准备对Web请求进行处理，在HandlerMapping实例被创建的过程中，在其中会建立起url与handler之间的对应关系，之后请求到来就可以获取到相应的handler进行处理。  
 
-之后Web请求到来，DispatcherServlet会根据具体的URL请求信息在HandlerMapping中进行查询，从而得到相应的HandlerExecutionChain，其中封装了对于interceptors和Controller中的handlermethod，之后先调用interceptors的前置处理，然后是由HandlerAdapter反射调用Controller的handlerMethod，然后是调用interceptors的后置处理，最后将数据返回给用户。
+之后Web请求到来，DispatcherServlet会根据具体的URL请求信息在HandlerMapping中进行查询，从而得到相应的HandlerExecutionChain，其中封装了对于interceptors和Controller中的handlermethod，之后先调用interceptors的前置处理，然后是由HandlerAdapter反射调用Controller的handlerMethod，然后是调用interceptors的后置处理，最后将响应数据返回给用户。
 
 在上面对SpringMVC框架的分析过程中，可以看到SpringMVC很好的提供了与web环境中的IOC容器的集成，在其功能实现中使用了IOC容器的许多特性，SpringMVC框架可以很好的作为对struts这样的web框架的替代。   
 

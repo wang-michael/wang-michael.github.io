@@ -313,6 +313,73 @@ _ _ _
 &emsp;&emsp;生成的代码十分清晰，一目了然，代理类除了代理HelloWorld接口中的sayHello()方法之外，还将自身的equals(),hashCode(),toString()方法交给被代理类来执行，也就是说我们在使用代理类执行这三个方法时，实际执行的是被代理类(本例中为HelloWorldImpl)的equals(), hashCode(), toString()方法，这也就解释了上面的为何被代理类与代理类toString()方法输出的内容完全相同的问题。  
 &emsp;&emsp;学习JDK实现动态代理机制中尚未解决的问题：查资料见到有人说因为是Java中不允许多重继承，JDK生成的代理类已经继承了Proxy类，所以不能再继承要被代理的类，所以JDK动态代理要求被代理类必须实现接口，那么JDK生成的代理类为何必须要继承Proxy类呢？？？  
 
+- 分析CGLib动态代理实现机制
+
+```java
+public class Test {
+
+    private static final String SEPARATOR = File.separator;
+    private static final String PROJECT_ROOTPATH = System.getProperty("user.dir");
+    private static final String SAVE_PATH = PROJECT_ROOTPATH + SEPARATOR + "cglibClasses";
+
+    public static void main(String[] args) {
+        //代理类class文件存入本地磁盘
+        System.setProperty(DebuggingClassWriter.DEBUG_LOCATION_PROPERTY, SAVE_PATH);
+        Enhancer enhancer = new Enhancer();
+        enhancer.setSuperclass(PersonService.class);
+        enhancer.setCallback(new CglibProxyIntercepter());
+
+        PersonService proxy= (PersonService) enhancer.create();
+
+        proxy.setPerson();
+        proxy.getPerson("1");
+    }
+}
+
+public class CglibProxyIntercepter implements MethodInterceptor {
+    /**
+     * sub：cglib生成的代理对象，method：被代理对象方法，objects：方法入参，methodProxy:代理方法
+     *
+     * FastClass机制就是对一个类的方法建立索引，通过索引来直接调用相应的方法,为了避免通过反射调用，提高效率
+     */
+    @Override
+    public Object intercept(Object sub, Method method, Object[] objects, MethodProxy methodProxy) throws Throwable {
+        System.out.println("执行前...");
+        // 通过引入MethodProxy类和动态生成的FastClass类使得可以直接调用被代理对象的方法而无需通过反射，这样更加高效
+        Object object = methodProxy.invokeSuper(sub, objects);
+        System.out.println("执行后...");
+        return object;
+    }
+}
+
+public class PersonService {
+    public PersonService() {
+        System.out.println("PersonService构造");
+    }
+    //该方法不能被子类覆盖，不会被CGLib动态代理
+    final public Person getPerson(String code) {
+        System.out.println("PersonService:getPerson>>"+code);
+        return null;
+    }
+
+    public void setPerson() {
+        System.out.println("PersonService:setPerson");
+    }
+}
+
+执行结果：
+PersonService构造
+执行前...
+PersonService:setPerson
+执行后...
+PersonService:getPerson>>1
+```  
+在CGLib动态代理执行过后，磁盘上保存了3个动态生成的类，经过debug得知一个类是动态生成的代理类(类名中不含FastClassByCGLIB)，其余两个类是在此代理类的代理方法被调用的时候生成的fastClass类，fastClass类中含有被代理类各个方法的索引，通过其可以直接调用被代理类的各个方法，这样的调用方式比JDK动态代理的反射调用方式更加高效。  
+
+CGLIB创建代理对象时所花费的时间却比JDK多。所以对于单例的对象，因为无需频繁创建对象，用CGLIB合适，反之使用JDK方式要更为合适一些。同时由于CGLib由于是采用动态创建子类的方法，对于final修饰的方法无法进行代理。   
+
+具体CGLib原理不再分析，参见： [Cglib动态代理实现方式](https://www.cnblogs.com/monkey0307/p/8328821.html)   
+
 (2)一个方法被多个切面增强，此方法被调用时各个切面的执行顺序如何判断？  
 
 &emsp;&emsp;对于在同一个切面定义的通知函数将会根据在类中的声明顺序执行。如下所示:
