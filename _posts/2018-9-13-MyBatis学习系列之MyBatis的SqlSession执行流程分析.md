@@ -1196,6 +1196,141 @@ insert,update,delete操作会清空所在namespace下的全部缓存。
 
 对于上述的问题的解决方案可以是通过拦截器判断执行的Sql语句涉及到哪些表，然后将相关表的缓存自动清空，但这样做会降低使用缓存的效率。  
 
+_ _ _
+### SqlSessionManager介绍
+SqlSessionManager同时实现了SqlSession和SqlSessionFactory接口，也就同时提供了SqlSessionFactory创建SqlSession对象以及SqlSession操作数据库的功能。
+
+SqlSessionManager作为SqlSessionFactory使用时与普通sqlSessionFactory没有什么区别：  
+```java
+public class MyBatisExample {
+
+    private static String resource = "configuration.xml";
+
+    public static void main(String[] args) throws IOException {
+        SqlSession sqlSession = null;
+        try {
+            // 使用sqlSessionManager获取SqlSession
+            SqlSessionManager sqlSessionManager = SqlSessionManager.newInstance(Resources.getResourceAsStream(resource));
+            sqlSession = sqlSessionManager.openSession(false);
+            // 猜测应该是根据mapper文件创建了一个实现了UserDao接口的代理对象
+            UserDao userDao = sqlSession.getMapper(UserDao.class);
+            User user = userDao.getById(1);
+            System.out.println(user);
+
+            User user1 = new User("heihei", 14);
+            int result = userDao.insertUser(user1);
+            System.out.println("result: " + result + " " + user1.getId());
+            sqlSession.commit();
+        } finally {
+            if (sqlSession != null) {
+                sqlSession.close();
+            }
+        }
+    }
+}
+
+public class SqlSessionManager implements SqlSessionFactory, SqlSession {
+
+  private final SqlSessionFactory sqlSessionFactory;
+  private final SqlSession sqlSessionProxy;
+
+  private final ThreadLocal<SqlSession> localSqlSession = new ThreadLocal<SqlSession>();
+
+  private SqlSessionManager(SqlSessionFactory sqlSessionFactory) {
+    this.sqlSessionFactory = sqlSessionFactory;
+    this.sqlSessionProxy = (SqlSession) Proxy.newProxyInstance(
+        SqlSessionFactory.class.getClassLoader(),
+        new Class[]{SqlSession.class},
+        new SqlSessionInterceptor());
+  }
+
+  // 使用SqlSessionManager.openSession方法获取SqlSession，与普通sqlSessionFactory没有什么区别
+  @Override
+  public SqlSession openSession() {
+    return sqlSessionFactory.openSession();
+  }
+}
+```
+SqlSessionManager作为SqlSession使用时有两种方式，使用哪种模式取决于在调用之前是否调用了SqlSessionManager.startManagedSession()方法，下面来看看这个方法的作用：  
+```java
+public class SqlSessionManager implements SqlSessionFactory, SqlSession {
+
+  private final ThreadLocal<SqlSession> localSqlSession = new ThreadLocal<SqlSession>();
+  
+  public void startManagedSession() {
+    this.localSqlSession.set(openSession());
+  }
+}
+```
+可见是新生成了一个数据库连接，之后将其放在了一个ThreadLocal变量中，这样做的目的是为了记录与当前线程绑定的SqlSession对象，供当前线程循环使用，从而避免在同一线程多次创建SqlSession对象带来的性能损失。如果在使用之前不调用SqlSessionManager.startManagedSession()方法，就会出现同一线程每次通过SqlSessionManager对象访问数据库时，都会创建新的DefaultSqlSession对象完成数据库操作：  
+```java
+public class SqlSessionManager implements SqlSessionFactory, SqlSession {
+
+  private final SqlSessionFactory sqlSessionFactory;
+  private final SqlSession sqlSessionProxy;
+
+  private final ThreadLocal<SqlSession> localSqlSession = new ThreadLocal<SqlSession>();
+
+  private SqlSessionManager(SqlSessionFactory sqlSessionFactory) {
+    this.sqlSessionFactory = sqlSessionFactory;
+    this.sqlSessionProxy = (SqlSession) Proxy.newProxyInstance(
+        SqlSessionFactory.class.getClassLoader(),
+        new Class[]{SqlSession.class},
+        new SqlSessionInterceptor());
+  }
+
+  @Override
+  public <T> T selectOne(String statement) {
+    // 使用动态代理对象进行实际操作
+    return sqlSessionProxy.<T> selectOne(statement);
+  }
+}
+```
+sqlSessionProxy是一个动态代理对象，对它的方法的调用会转到SqlSessionInterceptor.invoke方法中去：  
+```java
+public class SqlSessionManager implements SqlSessionFactory, SqlSession {
+
+  private class SqlSessionInterceptor implements InvocationHandler {
+    public SqlSessionInterceptor() {
+        // Prevent Synthetic Access
+    }
+
+    @Override
+    public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+      // 尝试从localSqlSession中获取之前通过startManagedSession方法设置好的SqlSession对象
+      final SqlSession sqlSession = SqlSessionManager.this.localSqlSession.get();
+      if (sqlSession != null) {
+        try {
+          // 反射调用sqlSession的方法
+          return method.invoke(sqlSession, args);
+        } catch (Throwable t) {
+          throw ExceptionUtil.unwrapThrowable(t);
+        }
+      } else {
+        // 如果之前没有通过startManagedSession方法设置sqlSession对象，则每次
+        // 通过SqlSessionManager对象访问数据库时，都会创建新的DefaultSqlSession对象
+        final SqlSession autoSqlSession = openSession();
+        try {
+          final Object result = method.invoke(autoSqlSession, args);
+          autoSqlSession.commit();
+          return result;
+        } catch (Throwable t) {
+          autoSqlSession.rollback();
+          throw ExceptionUtil.unwrapThrowable(t);
+        } finally {
+          autoSqlSession.close();
+        }
+      }
+    }
+  }
+}
+```
+通过上面代码分析可以看出，SqlSessionManager的作为SqlSession使用的优势在于可以记录与当前线程绑定的SqlSession对象，劣势在于对于实际SqlSession对象方法的调用是通过反射进行的，对效率会有所影响。  
+
+_ _ _
+### SqlSessionFactory与SqlSession线程安全
+SqlSessionFactory.openSession()方法我觉得是线程安全的，但创建好的SqlSession并不是是线程安全的，理由之一是每个SqlSession底层对应一个数据库的Connection连接，实际对数据库的操作都是使用这个Connection连接进行的，java.sql.Connection对象不是线程安全的，所以SqlSession对象不是线程安全的，最好在单线程中使用它。  
+
 关于MyBatis的SqlSession的执行流程就介绍到这里。  
 
 (完)  
