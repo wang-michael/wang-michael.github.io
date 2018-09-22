@@ -1165,6 +1165,13 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 	}
 }
 ```
+分析上述代码，可以确定的BeanFactoryPostProcessor回调方法执行顺序是：  
+1. 执行系统预定义的BeanDefinitionRegistryPostProcessor.postProcessBeanDefinitionRegistry方法。  
+2. 执行我们自定义的BeanDefinitionRegistryPostProcessor.postProcessBeanDefinitionRegistry方法。  
+3. 执行系统预定义的BeanDefinitionRegistryPostProcessor.postProcessBeanFactory方法。
+4. 执行我们自定义的BeanDefinitionRegistryPostProcessor.postProcessBeanFactory方法。
+5. 执行系统预定义的BeanFactoryPostProcessor.postProcessBeanFactory方法。
+6. 执行我们自定义的BeanFactoryPostProcessor.postProcessBeanFactory方法(根据实现的Ordered接口和配置文件中的顺序决定执行顺序)。  
 
 #### **registerBeanPostProcessors**
 注册拦截bean创建过程的BeanPostProcessors：  

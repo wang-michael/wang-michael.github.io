@@ -772,8 +772,7 @@ public class PreparedStatementHandler extends BaseStatementHandler {
 
 具体sqlSession执行过程图示如下：  
 <img src="/img/2018-9-13/sqlSessionExecutorProcess.png" width="700" height="700" alt="sqlSession执行流程" />
-<center>图1：sqlSession执行流程图</center>  
-  
+<center>图1：sqlSession执行流程图</center>    
 
 分析完上面的整个查找流程之后，我们再对sqlSession执行过程中的事务控制和缓存两个点做一下详细分析。    
 

@@ -1538,6 +1538,6 @@ _ _ _
 
 之后Web请求到来，DispatcherServlet会根据具体的URL请求信息在HandlerMapping中进行查询，从而得到相应的HandlerExecutionChain，其中封装了对于interceptors和Controller中的handlermethod，之后先调用interceptors的前置处理，然后是由HandlerAdapter反射调用Controller的handlerMethod，然后是调用interceptors的后置处理，最后将响应数据返回给用户。
 
-在上面对SpringMVC框架的分析过程中，可以看到SpringMVC很好的提供了与web环境中的IOC容器的集成，在其功能实现中使用了IOC容器的许多特性，SpringMVC框架可以很好的作为对struts这样的web框架的替代。   
+在上面对SpringMVC框架的分析过程中，可以看到SpringMVC很好的提供了与web环境中的IOC容器的集成，在其功能实现中使用了IOC容器的许多特性。   
 
 (完)  
