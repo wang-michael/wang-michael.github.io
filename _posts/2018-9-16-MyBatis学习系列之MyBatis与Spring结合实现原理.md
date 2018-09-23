@@ -80,7 +80,7 @@ _ _ _
         <property name="driverClassName" value="com.mysql.jdbc.Driver" />
         <property name="url" value="jdbc:mysql://127.0.0.1:3306/mybatisStudy?characterEncoding=utf8&amp;allowMultiQueries=yes" />
         <property name="username" value="root" />
-        <property name="password" value="mima_mima" />
+        <property name="password" value="" />
     </bean>
 
     <tx:annotation-driven transaction-manager="transactionManager"/>
@@ -105,7 +105,7 @@ _ _ _
     <aop:aspectj-autoproxy/>
 </beans>
 ```  
-其中与MyBatis加载相关的是id为sqlSessionFactory和id为userMapper的两个Bean。顾名思义，猜测SqlSessionFactoryBean是用来创建SqlSessionFactory对象的，MapperFactoryBean是用来创建mapper口对应的代理对象的，SqlSessionFactory是使用MyBatis的基础，下面就从这个类的实现开始看起。  
+其中与MyBatis加载相关的是id为sqlSessionFactory和id为userMapper的两个Bean。顾名思义，SqlSessionFactoryBean是用来创建SqlSessionFactory对象的，MapperFactoryBean是用来创建mapper接口对应的代理对象的，SqlSessionFactory是使用MyBatis的基础，下面就从这个类的实现开始看起。  
 
 _ _ _
 ### **SqlSessionFactoryBean创建**  
@@ -694,12 +694,15 @@ public class MapperFactoryBean<T> extends SqlSessionDaoSupport implements Factor
   }
 }
 ```
-每个mapper代理对象含有一个自己的SqlSessionTemplate对象，这些SqlSessionTemplate对象引用了一个共同的SqlSessionFactoryBean对象。      
+每个mapper代理对象含有一个自己的SqlSessionTemplate对象，这些SqlSessionTemplate对象引用了一个共同的SqlSessionFactory对象。      
+
+<img src="/img/2018-9-16/MapperAndSqlSessionTemplate.png" width="700" height="700" alt="代理对象与SqlSessionTemplate对象之间的关系" />
+<center>图1：代理对象与SqlSessionTemplate对象之间的关系</center> 
 
 接下来继续分析实际mapper接口代理对象的构建过程。    
 
 _ _ _
-### **SqlSessionTemplate.getMapper(Class<T> type)生成实际mapper接口代理对象**
+### SqlSessionTemplate.getMapper(Class<T> type)生成实际mapper接口代理对象
 ```java
 public class MapperFactoryBean<T> extends SqlSessionDaoSupport implements FactoryBean<T> {
 
@@ -745,6 +748,7 @@ public class MapperRegistry {
 public class MapperProxyFactory<T> {
 
   public T newInstance(SqlSession sqlSession) {
+    // MapperProxy中持有的SqlSession对象实际是一个SqlSessionTemplate类对象
     final MapperProxy<T> mapperProxy = new MapperProxy<T>(sqlSession, mapperInterface, methodCache);
     return newInstance(mapperProxy);
   }
@@ -755,3 +759,440 @@ public class MapperProxyFactory<T> {
 }
 ```
 最终获得的代理对象中持有的invocationHandler是一个MapperProxy类对象，其中引用的SqlSession对象是一个SqlSessionTemplate类的实例。  
+
+我在之前的博客[MyBatis学习系列之MyBatis的SqlSession执行流程分析](https://wang-michael.github.io/2018/09/13/MyBatis%E5%AD%A6%E4%B9%A0%E7%B3%BB%E5%88%97%E4%B9%8BMyBatis%E7%9A%84SqlSession%E6%89%A7%E8%A1%8C%E6%B5%81%E7%A8%8B%E5%88%86%E6%9E%90/)中分析到了SqlSession对象在多线程使用时不是线程安全的，**在与Spring结合的过程中使用MyBatis时我们使用的单例mapper对象是可能在多线程情况下被操作的，那么线程安全问题是怎么解决的呢？**下面就来分析这个问题。     
+
+#### **mapper接口代理对象的方法执行过程**
+上面已经说过mapper接口代理对象持有的invocationHandler是一个MapperProxy类的实例对象，那么就从MapperProxy.invoke()方法开始分析：  
+```java
+public class MapperProxy<T> implements InvocationHandler, Serializable {
+
+  private static final long serialVersionUID = -6424540398559729838L;
+  private final SqlSession sqlSession; // 实际是一个SqlSessionTemplate类对象
+  private final Class<T> mapperInterface;
+  private final Map<Method, MapperMethod> methodCache;
+
+  public MapperProxy(SqlSession sqlSession, Class<T> mapperInterface, Map<Method, MapperMethod> methodCache) {
+    this.sqlSession = sqlSession;
+    this.mapperInterface = mapperInterface;
+    this.methodCache = methodCache;
+  }
+
+  @Override
+  public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+    if (Object.class.equals(method.getDeclaringClass())) {
+      try {
+        return method.invoke(this, args);
+      } catch (Throwable t) {
+        throw ExceptionUtil.unwrapThrowable(t);
+      }
+    }
+    final MapperMethod mapperMethod = cachedMapperMethod(method);
+    return mapperMethod.execute(sqlSession, args);
+  }
+}
+
+public class MapperMethod {
+
+  public Object execute(SqlSession sqlSession, Object[] args) {
+    Object result;
+    switch (command.getType()) {
+      case INSERT: {
+    	Object param = method.convertArgsToSqlCommandParam(args);
+        result = rowCountResult(sqlSession.insert(command.getName(), param));
+        break;
+      }
+      case UPDATE: {
+        Object param = method.convertArgsToSqlCommandParam(args);
+        result = rowCountResult(sqlSession.update(command.getName(), param));
+        break;
+      }
+      case DELETE: {
+        Object param = method.convertArgsToSqlCommandParam(args);
+        result = rowCountResult(sqlSession.delete(command.getName(), param));
+        break;
+      }
+      case SELECT:
+        if (method.returnsVoid() && method.hasResultHandler()) {
+          executeWithResultHandler(sqlSession, args);
+          result = null;
+        } else if (method.returnsMany()) {
+          result = executeForMany(sqlSession, args);
+        } else if (method.returnsMap()) {
+          result = executeForMap(sqlSession, args);
+        } else if (method.returnsCursor()) {
+          result = executeForCursor(sqlSession, args);
+        } else {
+          // 使用sqlSession进行实际的数据库操作
+          Object param = method.convertArgsToSqlCommandParam(args);
+          result = sqlSession.selectOne(command.getName(), param);
+        }
+        break;
+      case FLUSH:
+        result = sqlSession.flushStatements();
+        break;
+      default:
+        throw new BindingException("Unknown execution method for: " + command.getName());
+    }
+    if (result == null && method.getReturnType().isPrimitive() && !method.returnsVoid()) {
+      throw new BindingException("Mapper method '" + command.getName() 
+          + " attempted to return null from a method with a primitive return type (" + method.getReturnType() + ").");
+    }
+    return result;
+  }
+}
+```
+接下来介绍实际对数据库进行操作的sqlSession.selectOne()方法(这里的sqlSession实际是一个SqlSessionTemplate类对象)，在继续向下分析之前，先来看下SqlSessionTemplate的创建过程：    
+```java
+public class SqlSessionTemplate implements SqlSession, DisposableBean {
+
+  // applicationContext中配置的sqlSessionFactory,多个SqlSessionTemplate共用一个
+  private final SqlSessionFactory sqlSessionFactory; 
+
+  private final ExecutorType executorType;
+
+  // 每个SqlSessionTemplate有自己的sqlSessionProxy对象
+  private final SqlSession sqlSessionProxy; // 动态代理对象
+
+  private final PersistenceExceptionTranslator exceptionTranslator;
+
+  public SqlSessionTemplate(SqlSessionFactory sqlSessionFactory) {
+    // 默认用的是ExecutorType.SIMPLE，SimpleExecutor实现
+    this(sqlSessionFactory, sqlSessionFactory.getConfiguration().getDefaultExecutorType());
+  }
+
+  public SqlSessionTemplate(SqlSessionFactory sqlSessionFactory, ExecutorType executorType) {
+    this(sqlSessionFactory, executorType,
+        new MyBatisExceptionTranslator(
+            sqlSessionFactory.getConfiguration().getEnvironment().getDataSource(), true));
+  }
+
+  public SqlSessionTemplate(SqlSessionFactory sqlSessionFactory, ExecutorType executorType,
+      PersistenceExceptionTranslator exceptionTranslator) {
+
+    notNull(sqlSessionFactory, "Property 'sqlSessionFactory' is required");
+    notNull(executorType, "Property 'executorType' is required");
+
+    this.sqlSessionFactory = sqlSessionFactory;
+    this.executorType = executorType;
+    this.exceptionTranslator = exceptionTranslator;
+    // 动态代理，invocationHandler为SqlSessionInterceptor类对象
+    this.sqlSessionProxy = (SqlSession) newProxyInstance(
+        SqlSessionFactory.class.getClassLoader(),
+        new Class[] { SqlSession.class },
+        new SqlSessionInterceptor());
+  }  
+  
+}
+
+public class Proxy implements java.io.Serializable {
+
+  @CallerSensitive
+    public static Object newProxyInstance(ClassLoader loader,
+                                          Class<?>[] interfaces,
+                                          InvocationHandler h)
+        throws IllegalArgumentException
+    {
+        Objects.requireNonNull(h);
+
+        final Class<?>[] intfs = interfaces.clone();
+        final SecurityManager sm = System.getSecurityManager();
+        if (sm != null) {
+            checkProxyAccess(Reflection.getCallerClass(), loader, intfs);
+        }
+
+        /*
+         * Look up or generate the designated proxy class.
+         */
+        Class<?> cl = getProxyClass0(loader, intfs);
+
+        /*
+         * Invoke its constructor with the designated invocation handler.
+         */
+        try {
+            if (sm != null) {
+                checkNewProxyPermission(Reflection.getCallerClass(), cl);
+            }
+
+            final Constructor<?> cons = cl.getConstructor(constructorParams);
+            final InvocationHandler ih = h;
+            if (!Modifier.isPublic(cl.getModifiers())) {
+                AccessController.doPrivileged(new PrivilegedAction<Void>() {
+                    public Void run() {
+                        cons.setAccessible(true);
+                        return null;
+                    }
+                });
+            }
+            return cons.newInstance(new Object[]{h});
+        } catch (IllegalAccessException|InstantiationException e) {
+            throw new InternalError(e.toString(), e);
+        } catch (InvocationTargetException e) {
+            Throwable t = e.getCause();
+            if (t instanceof RuntimeException) {
+                throw (RuntimeException) t;
+            } else {
+                throw new InternalError(t.toString(), t);
+            }
+        } catch (NoSuchMethodException e) {
+            throw new InternalError(e.toString(), e);
+        }
+    }
+}
+```
+接下来看selectOne()方法实现：  
+```java
+public class SqlSessionTemplate implements SqlSession, DisposableBean {
+
+  @Override
+  public <T> T selectOne(String statement) {
+    // 调用SqlSessionInterceptor.invoke()方法
+    return this.sqlSessionProxy.<T> selectOne(statement);
+  }
+
+  private class SqlSessionInterceptor implements InvocationHandler {
+    @Override
+    public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+      // 先获取sqlSession
+      SqlSession sqlSession = getSqlSession(
+          SqlSessionTemplate.this.sqlSessionFactory,
+          SqlSessionTemplate.this.executorType,
+          SqlSessionTemplate.this.exceptionTranslator);
+
+      try {
+        // 接下来就是使用真正的sqlSession.selectOne方法进行查询的过程了，之前的博客中介绍过，不再分析
+        Object result = method.invoke(sqlSession, args);
+        if (!isSqlSessionTransactional(sqlSession, SqlSessionTemplate.this.sqlSessionFactory)) {
+          // force commit even on non-dirty sessions because some databases require
+          // a commit/rollback before calling close()
+          sqlSession.commit(true);
+        }
+        return result;
+      } catch (Throwable t) {
+        Throwable unwrapped = unwrapThrowable(t);
+        if (SqlSessionTemplate.this.exceptionTranslator != null && unwrapped instanceof PersistenceException) {
+          // release the connection to avoid a deadlock if the translator is no loaded. See issue #22
+          closeSqlSession(sqlSession, SqlSessionTemplate.this.sqlSessionFactory);
+          sqlSession = null;
+          Throwable translated = SqlSessionTemplate.this.exceptionTranslator.translateExceptionIfPossible((PersistenceException) unwrapped);
+          if (translated != null) {
+            unwrapped = translated;
+          }
+        }
+        throw unwrapped;
+      } finally {
+        if (sqlSession != null) {
+          closeSqlSession(sqlSession, SqlSessionTemplate.this.sqlSessionFactory);
+        }
+      }
+    }
+  }
+}
+
+public final class SqlSessionUtils {
+
+  public static SqlSession getSqlSession(SqlSessionFactory sessionFactory, ExecutorType executorType, PersistenceExceptionTranslator exceptionTranslator) {
+
+    notNull(sessionFactory, NO_SQL_SESSION_FACTORY_SPECIFIED);
+    notNull(executorType, NO_EXECUTOR_TYPE_SPECIFIED);
+    
+    // 线程初次调用这个方法时返回null，线程+sessionFactory对象——>决定一个线程对应的SqlSessionHolder对象
+    SqlSessionHolder holder = (SqlSessionHolder) TransactionSynchronizationManager.getResource(sessionFactory);
+    
+    // 线程初次调用时返回值为null，发现session为null之后就会在TransactionSynchronizationManager中为此线程创建
+    // 其对应的sessionHolder对象，之后再使用时就可以直接获取啦  
+    SqlSession session = sessionHolder(executorType, holder);
+    if (session != null) {
+      return session;
+    }
+
+    if (LOGGER.isDebugEnabled()) {
+      LOGGER.debug("Creating a new SqlSession");
+    }
+    
+    // 线程初次调用时会为此线程建立自己的sqlSession，也就是说实质上每个线程有自己的sqlSession对象
+    session = sessionFactory.openSession(executorType);
+    // 建立完sqlSession之后要将其在TransactionSynchronizationManager中保存，以便此线程之后使用时获取
+    registerSessionHolder(sessionFactory, executorType, exceptionTranslator, session);
+
+    return session;
+  }
+
+  private static void registerSessionHolder(SqlSessionFactory sessionFactory, ExecutorType executorType,
+      PersistenceExceptionTranslator exceptionTranslator, SqlSession session) {
+    SqlSessionHolder holder;
+    if (TransactionSynchronizationManager.isSynchronizationActive()) {
+      Environment environment = sessionFactory.getConfiguration().getEnvironment();
+
+      if (environment.getTransactionFactory() instanceof SpringManagedTransactionFactory) {
+        // 使用SpringManagedTransactionFactory将事务交给Spring进行管理
+        if (LOGGER.isDebugEnabled()) {
+          LOGGER.debug("Registering transaction synchronization for SqlSession [" + session + "]");
+        }
+        // 使用SqlSessionHolder包装SqlSession对象
+        holder = new SqlSessionHolder(session, executorType, exceptionTranslator);
+        // 重点！！！将sessionFactory与holder的对应关系设置到TransactionSynchronizationManager中的ThreadLocal变量中
+        // 以便此线程之后使用此SqlSessionHolder对象时可以再次获取到
+        TransactionSynchronizationManager.bindResource(sessionFactory, holder);
+        // 这句代码的作用是？？？
+        TransactionSynchronizationManager.registerSynchronization(new SqlSessionSynchronization(holder, sessionFactory));
+        holder.setSynchronizedWithTransaction(true);
+        holder.requested();
+      } else {
+        if (TransactionSynchronizationManager.getResource(environment.getDataSource()) == null) {
+          if (LOGGER.isDebugEnabled()) {
+            LOGGER.debug("SqlSession [" + session + "] was not registered for synchronization because DataSource is not transactional");
+          }
+        } else {
+          throw new TransientDataAccessResourceException(
+              "SqlSessionFactory must be using a SpringManagedTransactionFactory in order to use Spring transaction synchronization");
+        }
+      }
+    } else {
+      if (LOGGER.isDebugEnabled()) {
+        LOGGER.debug("SqlSession [" + session + "] was not registered for synchronization because synchronization is not active");
+      }
+    }
+  }
+}
+
+public class DefaultSqlSessionFactory implements SqlSessionFactory {
+  
+  @Override
+  public SqlSession openSession(ExecutorType execType) {
+    return openSessionFromDataSource(execType, null, false);
+  }
+
+  private SqlSession openSessionFromDataSource(ExecutorType execType, TransactionIsolationLevel level, boolean autoCommit) {
+    Transaction tx = null;
+    try {
+      final Environment environment = configuration.getEnvironment();
+
+      // 注意这里使用的TransactionFactory是SpringManagedTransactionFactory
+      // 就是因为使用了这个SpringManagedTransactionFactory才做到了将事务交由Spring管理
+      final TransactionFactory transactionFactory = getTransactionFactoryFromEnvironment(environment);
+      tx = transactionFactory.newTransaction(environment.getDataSource(), level, autoCommit);
+      final Executor executor = configuration.newExecutor(tx, execType);
+
+      return new DefaultSqlSession(configuration, executor, autoCommit);
+    } catch (Exception e) {
+      closeTransaction(tx); // may have fetched a connection so lets call close()
+      throw ExceptionFactory.wrapException("Error opening session.  Cause: " + e, e);
+    } finally {
+      ErrorContext.instance().reset();
+    }
+  }
+}
+```
+分析完上述代码之后，我们可以看到SqlSessionTemplate在执行的过程中会通过其内部的代理对象为每个线程生成自己的SqlSession对象并保存在TransactionSynchronizationManager中的ThreadLocal变量中，就是通过**动态代理的设计模式加上ThreadLocal方式完成了线程与SqlSession对象之间的对应**，实现了MyBatis与Spring之间的集成。  
+
+#### **SpringManagedTransaction如何将事务交由Spring处理**
+我们知道Spring与MyBatis结合之后是会将事务交由Spring进行处理的，这是通过SpringManagedTransaction来实现的，sqlSession在执行时使用的Connection对象是通过SpringManagedTransaction.getConnection()方法来实现的，我们就从这个方法开始分析：  
+```java
+public class SpringManagedTransaction implements Transaction {
+
+  private final DataSource dataSource;
+
+  private Connection connection;
+
+  public SpringManagedTransaction(DataSource dataSource) {
+    notNull(dataSource, "No DataSource specified");
+    this.dataSource = dataSource;
+  }
+
+  @Override
+  public Connection getConnection() throws SQLException {
+    // 之前没创建过Connection才创建新的Connection
+    if (this.connection == null) {
+      openConnection();
+    }
+    return this.connection;
+  }
+
+  private void openConnection() throws SQLException {
+    // 获取数据库连接
+    this.connection = DataSourceUtils.getConnection(this.dataSource);  
+    this.autoCommit = this.connection.getAutoCommit();
+    // 判断获取到的连接是不是已经开启了事务的
+    this.isConnectionTransactional = DataSourceUtils.isConnectionTransactional(this.connection, this.dataSource);
+
+    if (LOGGER.isDebugEnabled()) {
+      LOGGER.debug(
+          "JDBC Connection ["
+              + this.connection
+              + "] will"
+              + (this.isConnectionTransactional ? " " : " not ")
+              + "be managed by Spring");
+    }
+  }
+
+  @Override
+  public void commit() throws SQLException {
+    // 只有在事务是由sqlSession开启的才提交，否则不进行任何操作(比如在事务是由Spring开启的情况下)
+    if (this.connection != null && !this.isConnectionTransactional && !this.autoCommit) {
+      if (LOGGER.isDebugEnabled()) {
+        LOGGER.debug("Committing JDBC Connection [" + this.connection + "]");
+      }
+      this.connection.commit();
+    }
+  }
+}
+
+public abstract class DataSourceUtils {
+
+    public static Connection getConnection(DataSource dataSource) throws CannotGetJdbcConnectionException {
+		try {
+			return doGetConnection(dataSource);
+		}
+		catch (SQLException ex) {
+			throw new CannotGetJdbcConnectionException("Could not get JDBC Connection", ex);
+		}
+	}
+
+    public static Connection doGetConnection(DataSource dataSource) throws SQLException {
+		Assert.notNull(dataSource, "No DataSource specified");
+        
+        // 可见获取Connection的过程是先尝试从TransactionSynchronizationManager中获取，获取不到才创建
+		ConnectionHolder conHolder = (ConnectionHolder) TransactionSynchronizationManager.getResource(dataSource);
+		if (conHolder != null && (conHolder.hasConnection() || conHolder.isSynchronizedWithTransaction())) {
+			conHolder.requested();
+			if (!conHolder.hasConnection()) {
+				logger.debug("Fetching resumed JDBC Connection from DataSource");
+				conHolder.setConnection(dataSource.getConnection());
+			}
+			return conHolder.getConnection();
+		}
+		// Else we either got no holder or an empty thread-bound holder here.
+
+		logger.debug("Fetching JDBC Connection from DataSource");
+		Connection con = dataSource.getConnection();
+
+		if (TransactionSynchronizationManager.isSynchronizationActive()) {
+			logger.debug("Registering transaction synchronization for JDBC Connection");
+			// Use same Connection for further JDBC actions within the transaction.
+			// Thread-bound object will get removed by synchronization at transaction completion.
+			ConnectionHolder holderToUse = conHolder;
+			if (holderToUse == null) {
+				holderToUse = new ConnectionHolder(con);
+			}
+			else {
+				holderToUse.setConnection(con);
+			}
+			holderToUse.requested();
+			TransactionSynchronizationManager.registerSynchronization(
+					new ConnectionSynchronization(holderToUse, dataSource));
+			holderToUse.setSynchronizedWithTransaction(true);
+			if (holderToUse != conHolder) {
+				TransactionSynchronizationManager.bindResource(dataSource, holderToUse);
+			}
+		}
+
+		return con;
+	}
+}
+```
+经过上述代码分析可知通过SpringManagedTransaction.getConnection方法获取数据库连接的过程是先通过TransactionSynchronizationManager.getResource方法尝试获取，拿不到再创建。而在我之前的博客[Spring学习系列之Spring事务处理机制的实现](https://wang-michael.github.io/2018/09/17/Spring%E5%AD%A6%E4%B9%A0%E7%B3%BB%E5%88%97%E4%B9%8BSpring%E4%BA%8B%E5%8A%A1%E5%A4%84%E7%90%86%E6%9C%BA%E5%88%B6%E7%9A%84%E5%AE%9E%E7%8E%B0/)中分析到Spring在Service层开启事务之后会把当前线程对应的开启了事务的Connection对象封装成ConnectionHolder对象存入TransactionSynchronizationManager中，所以我们通过TransactionSynchronizationManager.getResource方法获取到的就是这个已经开启了事务的Connection，就是通过这种方式实现了将事务交给Spring控制的，所以TransactionSynchronizationManager在Spring事务控制的过程中的地位也是很重要的，是MyBatis与Spring之间沟通的桥梁。  
+
+关于MyBatis与Spring结合实现原理就分析到这里。  
+
+(完)     
