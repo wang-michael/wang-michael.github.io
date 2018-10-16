@@ -597,10 +597,10 @@ public class DefaultBeanDefinitionDocumentReader implements BeanDefinitionDocume
 		BeanDefinitionParserDelegate parent = this.delegate;
 		this.delegate = createDelegate(this.readerContext, root, parent);
 
-		preProcessXml(root);
+		preProcessXml(root); // 解析前置处理，由子类扩展
         // 从xml文件根标签开始解析
 		parseBeanDefinitions(root, this.delegate);
-		postProcessXml(root);
+		postProcessXml(root); // 解析后置处理，由子类扩展
 
 		this.delegate = parent;
 	}
@@ -614,9 +614,11 @@ public class DefaultBeanDefinitionDocumentReader implements BeanDefinitionDocume
 				if (node instanceof Element) {
 					Element ele = (Element) node;
 					if (delegate.isDefaultNamespace(ele)) {
+                        /* 默认标签的解析 */
 						parseDefaultElement(ele, delegate);
 					}
 					else {
+                        /* 自定义标签的解析 delegate可以是BeanDefinitionParserDelegate类对象 */
 						delegate.parseCustomElement(ele);
 					}
 				}

@@ -121,7 +121,20 @@ Spring AOP的实现和其他特性的实现一样，除了可以使用Spring本�
 **AOP框架均可以将切面在切入点织入到目标对象中，在目标对象的生命周期里有多个点可以进行织入：**  
 * 编译期：切面在目标类编译时被织入。这种方式需要特殊的编译器。AspectJ的织入编译器就是以这种方式织入切面的。
 * 类加载期：切面在目标类加载到JVM时被织入。这种方式需要特殊的类加载器(ClassLoader)，它可以在目标类被引入应用之前增强该目标类的字节码。
-* 运行期：切面在应用运行的某个时刻被织入。一般情况下，在织入切面时，AOP容器会为目标对象动态的创建一个代理对象。SpringAOP就是以这种方式织入切面的。  
+* 运行期：切面在应用运行的某个时刻被织入。一般情况下，在织入切面时，AOP容器会为目标对象动态的创建一个代理对象。SpringAOP就是以这种
+方式织入切面的。  
+
+**aop:aspectj-autoproxy标签处理：**
+通过aop命名空间的<aop:aspectj-autoproxy />声明自动为spring容器中那些配置@aspectJ切面的bean创建代理，织入切面。当然，spring
+在内部依旧采用AnnotationAwareAspectJAutoProxyCreator进行自动代理的创建工作，但具体实现的细节已经被<aop:aspectj-autoproxy />
+隐藏起来了，对这个自定义标签的处理的主要任务就是在WAC中注册一个BeanPostProcessor，也就是AnnotationAwareAspectJAutoProxyCreator类的实例对象，之后使用这个processor对符合切面要求的bean进行代理增强。
+具体处理过程可参考：[SpringAOP源码解析之aop:aspectj-autoproxy标签解析](https://blog.csdn.net/heroqiang/article/details/79037741)
+注意父WAC中的切面可以对子WAC中的bean进行增强，子WAC中的切面不能对父WAC中的bean进行增强。要被增强的bean的在哪个容器中，哪个容器中就要注册相应的BeanPostProcessor来对要被切面增强的bean进行代理对象的生成。    
+
+父容器中的BeanPostProcessor对于子容器中的bean是不生效的，子容器中的BeanPostProcessor对于父容器中的bean也是这样。  
+
+<aop:aspectj-autoproxy/> 
+
 
 **学完这部分之后要解决的问题：** 
 * Spring AOP带来的好处
@@ -136,6 +149,14 @@ Spring AOP的实现和其他特性的实现一样，除了可以使用Spring本�
 * Spring MVC DispatcherServlet启动与销毁
 * Spring MVC 请求处理流程，涉及的mvc框架组件，应用的设计模式
 * struts2是如何与Spring结合到一起的？？？  
+
+Spring MVC中含有多种HandlerMapping，用来负责分发不同类型的请求到对应的Controller，RequestMappingHandlerMapping是其中一种，用来将@RequestMapping中url对应的请求分发到对应的方法，每个DispatcherServlet对应一个RequestMappingHandlerMapping；每个RequestMappingHandlerMapping默认会处理自己所在的WebApplicationContext及父容器中的所有的带有@RequestMapping的注解，当然也可以设置只处理自己所在的WebApplicationContext中的@RequestMapping注解，建立起Controller中处理方法与请求url之间的对应关系。  
+
+**问题：为什么要设置一个公用上下文和一个子上下文？都使用这个公用上下文不就好了？**
+在一个SpringMVC的web应用中，可以有一个公用的父上下文和多个DispatcherServlet，其中每个DispatcherServlet都可以有自己的上下文，可以只实例化自己想要控制的Controller，对于那些不想被公用的bean定义比如这里只想自己管的Controller)，需要在自己的上下文配置文件中定义。  
+
+父上下文与子上下文中的上下文是分开管理的吗？比如在父上下文中创建的BeanPostProcessor对于子上下文中创建的bean是不是不生效呢？
+答案：是分开管理的，父WAC中的BeanPostProcessor不会拦截子WAC中的bean。  
 
 ## 四、Spring JDBCTemplate及Mybatis适配实现部分学习
 ### Java原生JDBC部分
@@ -155,7 +176,16 @@ Java原生JDBC：java访问数据库的基石，其它框架如Hibernate、MyBat
 
 ## 五、Spring 事务控制实现部分学习
 
+## 六、Spring 标签解析
+默认标签包含4个：alias、import、bean、beans（当然这里所说的标签不包括那些以子标签形式存在的如property、value等标签）  
+自定义标签：如我们熟知的事务标签<tx:annotation-driven/>、注解扫描标签<context:component-scan/>等都属于自定义标签  
+参考文章：
+[Spring源码解析之默认标签的解析](https://blog.csdn.net/heroqiang/article/details/78599052)  
+[Spring源码解析之自定义标签的解析](https://blog.csdn.net/heroqiang/article/details/78611213)  
+[Spring源码解析之context:component-scan标签解析](https://blog.csdn.net/heroqiang/article/details/79019359)  
 
 ## 代码分析心得
 以组件的方式对每种框架进行分析。从Demo开始进行分析。    
+
+
 

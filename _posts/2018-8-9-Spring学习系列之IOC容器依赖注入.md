@@ -100,6 +100,21 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 
 				// Guarantee initialization of beans that the current bean depends on.
                 // 获取当前Bean的所有依赖bean，这会触发getBean的依赖调用，直到获取到一个没有依赖的bean为止
+                /**
+                 * 这里的depends on属性设置的bean与在property中通过ref引用的bean不同，
+                 * depend-on用来表示一个Bean的实例化依靠另一个Bean先实例化。如果在一个bean A上定义了depend-on B那么就表示：A   
+                 * 实例化前先实例化 B。
+                 * 这种情况下，A可能根本不需要持有一个B对象。
+                 * 比如说，你的DAO Bean实例化之前你必须要先实例化Database Bean，DAO Bean并不需要持有一个Database Bean的实
+                 * 例。因为DAO的使用是依赖Database启动的，如果Database Bean不启动，那么DAO即使实例化也是不可用的。这种情况DAO
+                 * 对Database的依赖是不直接的。  
+                 *  <beans>
+                 *    <bean name="dao" class="research.spring.beanfactory.ch3.Dao" depends-on="database" >
+                 *    </bean>
+                 *    <bean id="database" class="research.spring.beanfactory.ch3.Database">
+                 *    </bean>   
+                 *  </beans>
+                 */
 				String[] dependsOn = mbd.getDependsOn();
 				if (dependsOn != null) {
 					for (String dependsOnBean : dependsOn) {

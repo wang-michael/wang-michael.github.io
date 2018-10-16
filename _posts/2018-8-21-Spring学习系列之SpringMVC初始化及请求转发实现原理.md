@@ -125,7 +125,7 @@ public class ContextLoader {
 }
 ```
 ContextLoader.initWebApplicationContext方法中完成了两个IOC容器建立的基本过程，一个是在Web容器中建立起双亲IOC容器，另一个是生成相应的WebApplicationContext并将其初始化。在继续向下分析之前，先来看下WebApplicationContext接口的类层次关系：  
-<img src="/img/2018-8-21/WebApplicationContextExtends.png" width="500" height="500" alt="WebApplicationContextExtends" />
+<img src="/img/2018-8-21/WebApplicationContextExtends.png" width="700" height="700" alt="WebApplicationContextExtends" />
 <center>图1：WebApplicationContext接口类层次关系</center>
 
 接下来看创建WebApplicationContext的createWebApplicationContext方法：  
@@ -214,7 +214,7 @@ public abstract class BeanUtils {
 	}
 }
 ```
-获取到XmlWebApplicationContext之后再通过它在其configureAndRefreshWebApplicationContext方法中来启动IOC容器，与在普通应用中启动IOC容器的方式类似，不同之处在于需要考虑Web容器的环境特点；比如各种参数的设置，IOC容器与Web容器ServletContext的结合等等，这也正是有了XmlApplicationContext之后还要设计XMLWebApplicationContext的目的。  
+获取到XmlWebApplicationContext之后再通过它在其configureAndRefreshWebApplicationContext方法中来启动IOC容器，与在普通应用中启动IOC容器的方式类似，不同之处在于需要考虑Web容器的环境特点；比如各种参数的设置，IOC容器与Web容器ServletContext的结合等等，这也正是有了XmlApplicationContext之后还要设计XMLWebApplicationContext的目的。正是因为下面的代码将初始化好的XMLWebApplicationContext对象存入到ServletContext中，之后在DispatcherServlet中才可以通过ServletContext获取此XMLWebApplicationContext对象。  
 ```java
 public class ContextLoader {
 
@@ -572,6 +572,8 @@ public abstract class FrameworkServlet extends HttpServletBean {
         // 将WebApplicationContext与web环境结合
 		wac.setServletContext(getServletContext());
 		wac.setServletConfig(getServletConfig());
+        // 如果没有为此wac设置配置文件的位置的话，会默认使用servlet名称+ -servlet的后缀
+        // 比如dispatcher-servlet.xml，也就是这里设置的nameSpace
 		wac.setNamespace(getNamespace());
 		wac.addApplicationListener(new SourceFilteringListener(wac, new ContextRefreshListener()));
 
@@ -651,6 +653,7 @@ public class DispatcherServlet extends FrameworkServlet {
 	}
 }
 ```
+即使父WAC与DispatcherServlet建立起来的子WAC之间有bean的id相同，并且其属性被设置为单例的，这个Bean也会被初始化两次。比如ApplicationContext.xml与Dispatcher-servlet.xml中都配置了对Controller包的Component-Scan，那么这个包下的Controller类对象会被初始化两次。Controller中依赖的其它Bean(比如Service层的Bean)，如果子WAC中没有，会使用父WAC中的对应bean来进行依赖注入。    
 
 _ _ _
 ### **SpringMVC Web请求转发原理**
@@ -788,7 +791,7 @@ public abstract class AbstractHandlerMapping extends WebApplicationObjectSupport
 	}
 }
 ```
-上面介绍了RequestMappingHandlerMapping通过实现ApplicationContextAware接口回调实现了拦截器的注册，RequestMappingHandlerMapping还实现了EmbeddedValueResolverAware和InitializingBean接口，都会有相应的回调，来看看这些回调里面都做了些什么：  
+上面介绍了RequestMappingHandlerMapping通过实现ApplicationContextAware接口回调实现了拦截器(即我们实现的SpringMVC的interceptor)的注册，RequestMappingHandlerMapping还实现了EmbeddedValueResolverAware和InitializingBean接口，都会有相应的回调，来看看这些回调里面都做了些什么：  
 ```java
 public class RequestMappingHandlerMapping extends RequestMappingInfoHandlerMapping
 		implements EmbeddedValueResolverAware {
@@ -803,6 +806,7 @@ public class RequestMappingHandlerMapping extends RequestMappingInfoHandlerMappi
 		if (this.useRegisteredSuffixPatternMatch) {
 			this.fileExtensions.addAll(this.contentNegotiationManager.getAllFileExtensions());
 		}
+        // 调用AbstractHandlerMethodMapping.afterPropertiesSet()方法
 		super.afterPropertiesSet();
 	}
 
@@ -843,6 +847,10 @@ public class RequestMappingHandlerMapping extends RequestMappingInfoHandlerMappi
 }
 
 public abstract class AbstractHandlerMethodMapping<T> extends AbstractHandlerMapping implements InitializingBean {
+    
+    private final Map<T, HandlerMethod> handlerMethods = new LinkedHashMap<T, HandlerMethod>();
+    // 在其中保存访问路径与Controller中对应处理方法之间的关系
+	private final MultiValueMap<String, T> urlMap = new LinkedMultiValueMap<String, T>();
 
     /**
 	 * Detects handler methods at initialization.
@@ -862,7 +870,8 @@ public abstract class AbstractHandlerMethodMapping<T> extends AbstractHandlerMap
 			logger.debug("Looking for request mappings in application context: " + getApplicationContext());
 		}
 
-        // 找出容器中的所有bean的名称
+        // 找出当前子WAC容器中的所有bean的名称(默认detectHandlerMethodsInAncestorContexts为false，
+        // 所以不会扫描父WAC中的bean)
 		String[] beanNames = (this.detectHandlerMethodsInAncestorContexts ?
 				BeanFactoryUtils.beanNamesForTypeIncludingAncestors(getApplicationContext(), Object.class) :
 				getApplicationContext().getBeanNamesForType(Object.class));
@@ -943,9 +952,9 @@ public abstract class AbstractHandlerMethodMapping<T> extends AbstractHandlerMap
 	}
 }
 ```
-就是通过上面的过程，在RequestMappingHandlerMapping中建立起了handler method与mapping之间的匹配关系。  
+就是通过上面的过程，在RequestMappingHandlerMapping中建立起了handler method与mapping之间的匹配关系。需要注意的一点是建立此映射关系时默认只会扫描子WAC中的bean，建立其中包含的Controller中的url与对应处理方法之间的对应关系，所以对于Controller类的扫描最好放在子WAC中进行，否则会导致映射关系建立失败。如果实在想要扫描父WAC中的Controller，需要设置相应的HandlerMapping中的detectHandlerMethodsInAncestorContexts属性为true。    
 
-上面分析完了HandlerMapping的初始化过程，接下来就来看看SpringMVC对Web请求处理过程，我们从HTTPServlet的service方法开始分析：  
+上面分析完了HandlerMapping的初始化过程，接下来就来看看SpringMVC对Web请求处理过程，我们从HTTPServlet的service方法开始分析：   
 ```java
 public abstract class HttpServlet extends GenericServlet {
 

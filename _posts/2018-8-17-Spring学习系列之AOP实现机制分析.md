@@ -452,11 +452,7 @@ final class JdkDynamicAopProxy implements AopProxy, InvocationHandler, Serializa
 }
 
 ```
-总结下上面代码分析的获取代理对象的过程，首先是通过ProxyFactoryBean.getObject()获取，获取的时候先选择获取的对象是单例还是Prototype类型，上面分析的是获取的单例对象的方法getSingletonInstance，返回给我们的是一个代理对象，但是每次调用  getSingletonInstance返回给我们的代理对象都不是单例的，那单例体现在哪里呢？  
-
-原来每个返回的代理对象内部持有的被代理的目标对象都是单例的，可以通过以下这个图更清晰的看一下：    
-<img src="/img/2018-8-17/SpringJDKAOPDynamicImpl.png" width="700" height="700" alt="SpringJDKAOPDynamicImpl" />
-<center>图1：Spring AOP JDK动态代理单例实现</center>
+总结下上面代码分析的获取代理对象的过程，首先是通过ProxyFactoryBean.getObject()获取，获取的时候先选择获取的对象是单例还是Prototype类型，上面分析的是获取的单例对象的方法getSingletonInstance，返回给我们了一个之后要被调用的代理对象。  
 
 #### **对目标对象进行拦截增强**
 我们调用返回的代理对象的方法，实际都会被代理到此代理对象对应的JdkDynamicAopProxy中的invoke方法，就是在这个方法中完成了一个完整的拦截器链对目标对象的拦截过程，比如获得拦截器链并对拦截器链中的拦截器进行配置，逐个运行拦截器链里的拦截增强，直到最后到目标方法的运行等。下面就来分析这个invoke方法的内部实现：  
@@ -994,7 +990,7 @@ public class ThrowsAdviceInterceptor implements MethodInterceptor, AfterAdvice {
 ```
 ThrowsAdvice与BeforeAdvice和AfterAdvice接口的不同之处在于其接口中没有任何抽象方法，是一个标记接口，Spirng内部是用反射调用指定名称的默认方法来实现方法匹配的，需要实现下列接口中的其中1个：  
 <img src="/img/2018-8-17/ThrowsAdviceCallBack.png" width="700" height="700" alt="ThrowsAdvice接口默认回调" />
-<center>图2：ThrowsAdvice接口默认回调</center>
+<center>图1：ThrowsAdvice接口默认回调</center>
 
 通过上面的代码分析过程，我们可以得知对于下面这种配置方式，其执行顺序应当是：第一个sayhelloadvice的beforeAdvice -> 第二个sayhelloadvice的beforeAdvice -> 第二个sayhelloadvice的afterAdvice -> 第一个sayhelloadvice的afterAdvice。  
 ```java
@@ -1042,11 +1038,21 @@ _ _ _
             <aop:after-returning pointcut="execution(* mytests.aopTests.Waiter.say*(..))" method="afterReturning"></aop:after-returning>
         </aop:aspect>
     </aop:config>
+
+    <!--
+    通过aop命名空间的<aop:aspectj-autoproxy />声明自动为spring容器中那些配置@aspectJ切面的bean创建代理，织入切面。当然，spring
+    在内部依旧采用AnnotationAwareAspectJAutoProxyCreator进行自动代理的创建工作，但具体实现的细节已经被<aop:aspectj-autoproxy />
+    隐藏起来了，对这个自定义标签的处理的主要任务就是在WAC中注册一个BeanPostProcessor，也就是AnnotationAwareAspectJAutoProxyCreator类的实例对象，之后使用这个processor对符合切面要求的bean进行代理增强。
+    具体处理过程可参考：https://blog.csdn.net/heroqiang/article/details/79037741，
+    注意父WAC中的切面可以对子WAC中的bean进行增强，子WAC中的切面不能对父WAC中的bean进行增强。  
+    -->
+    <!--<aop:aspectj-autoproxy/>-->    
+
 </beans>
 ```
 经过这种配置方式之后，我们获取的Waiter对象也是被代理之后的，那么代理对象是怎么生成的呢？  
 
-原来Spring IOC容器初始化的时候在AbstractApplicationContext.refresh()方法中对registerBeanPostProcessors的调用会默认注册一些BeanPostProcessors，对于上面这种配置，就会产生一个AspectJAwareAdvisorAutoProxyCreator对象，它是一个BeanPostProcessor，会被注册到Spring IOC容器中。之后我们从IOC容器中获取的对象在实例化时都会经过此BeanPostProcessor的后置处理：  
+原来Spring IOC容器初始化的时候在AbstractApplicationContext.refresh()方法中对registerBeanPostProcessors的调用会默认注册一些BeanPostProcessors，对于上面这种配置，就会产生一个AspectJAwareAdvisorAutoProxyCreator对象(对于注解方式的AOP配置处理，使用的是AnnotationAwareAspectJAutoProxyCreator类对象)，它是一个BeanPostProcessor，会被注册到Spring IOC容器中。之后我们从IOC容器中获取的对象在实例化时都会经过此BeanPostProcessor的后置处理：  
 ```java
 public abstract class AbstractAutoProxyCreator extends ProxyConfig
 		implements SmartInstantiationAwareBeanPostProcessor, BeanClassLoaderAware, BeanFactoryAware,
