@@ -82,7 +82,7 @@ public class ThreadLocal<T> {
     }
     
 }
-public class ThreadLocal<T> {
+public class Thread implements Runnable {
     ...
     // 每个线程确实有用来存储ThreadLocal变量的数据结构称为ThreadLocalMap
     ThreadLocal.ThreadLocalMap threadLocals = null;

@@ -653,7 +653,7 @@ public class DispatcherServlet extends FrameworkServlet {
 	}
 }
 ```
-即使父WAC与DispatcherServlet建立起来的子WAC之间有bean的id相同，并且其属性被设置为单例的，这个Bean也会被初始化两次。比如ApplicationContext.xml与Dispatcher-servlet.xml中都配置了对Controller包的Component-Scan，那么这个包下的Controller类对象会被初始化两次。Controller中依赖的其它Bean(比如Service层的Bean)，如果子WAC中没有，会使用父WAC中的对应bean来进行依赖注入。    
+**需要注意的一点是：**即使父WAC与DispatcherServlet建立起来的子WAC之间有bean的id相同，并且其属性被设置为单例的，这个Bean也会被初始化两次。比如ApplicationContext.xml与Dispatcher-servlet.xml中都配置了对Controller包的Component-Scan，那么这个包下的Controller类对象会被初始化两次。Controller中依赖的其它Bean(比如Service层的Bean)，如果子WAC中没有，会使用父WAC中的对应bean来进行依赖注入。    
 
 _ _ _
 ### **SpringMVC Web请求转发原理**
