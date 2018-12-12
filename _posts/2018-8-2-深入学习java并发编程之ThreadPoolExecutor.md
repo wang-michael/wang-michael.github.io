@@ -793,7 +793,7 @@ private void interruptIdleWorkers(boolean onlyOne) {
     }
 }
 ```
-shutdown是把线程池状态转为SHUTDOWN，这时等待队列中的任务可以继续执行，但是不会接受新任务了，通过中断方式停止空闲的（根据没有获取锁来确定）线程。  
+shutdown是把线程池状态转为SHUTDOWN，这时正在执行中的任务可以继续执行，并且待处理的任务的队列中的任务也会运行(待确定？？？)，但是不会接受新任务了，通过中断方式停止空闲的（根据没有获取锁来确定）线程。直到所有任务处理完成，线程池真正关闭。     
 
 shutdownNow源码如下：  
 ```java
