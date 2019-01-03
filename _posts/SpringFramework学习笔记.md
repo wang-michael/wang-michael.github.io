@@ -741,7 +741,8 @@ HttpEncodingAutoConfiguration在满足其上的几个@Conditional的几个注解
 **web相关配置：**
 1. 把类路径下的/static，/public，/resources和/META-INF/resources文件夹下的静态文件直接映射为/**,可以通过localhost:8080/**来访问。  
 2. HttpMessageConverters支持:比如负责json消息转换的MessageConverter。
-3. 静态首页的支持：比如把index.html文件放置在如下目录，当我们访问应用根目录localhost:8080/时，会直接映射。
+3. 静态首页的支持：比如把index.html文件放置在如下目录，当我们访问应用根目录localhost:8080/时，会直接映射。  
+4. DispatcherServlet自动配置实现：org.springframework.boot.autoconfigure.web.DispatcherServletAutoConfiguration，**Spring所有自动配置的实现类在spring-boot-autoconfigure-xxx.jar中的META-INF/spring.facories文件中声明。**  
 
 当SpringBoot提供的Spring MVC默认配置不符合当前需求时，则可以通过一个配置类(注解含有@Configuration的类)加上@EnableWebMvc注解来实现完全自己控制的MVC配置。注意**使用了@EnableWebMvc注解就会屏蔽SpringBoot的自动配置**，通常情况下我们只需要自定义Spring MVC的部分配置，其余使用Spring Boot的默认配置就好，这时可以自定义一个配置类并继承WebMvcConfigureAdapter，无需使用@EnableWebMvc注解，然后添加我们自定义的SpringMVC配置。    
 
@@ -795,7 +796,9 @@ mem不等于在任务管理器上看到的进程占用的内存大小，因为�
 [SpringBoot关于Metrics返回值的源码-org.springframework.boot.actuate.endpoint.SystemPublicMetrics类](https://github.com/spring-projects/spring-boot/blob/v1.3.2.RELEASE/spring-boot-actuator/src/main/java/org/springframework/boot/actuate/endpoint/SystemPublicMetrics.java)
 
 ### SpringBoot web应用部署
-SpringBoot提供的SpringBootServletInitializer是一个支持SpringBoot的Spring WebApplicationInitializer实现，除了配置Spring的DispatcherServlet，他还会在Spring应用程序上下文中查找Filter、Servlet或者ServletContextInitializer类型的bean，将它们绑定到Servlet容器中。  
+SpringBoot提供的SpringBootServletInitializer是一个支持SpringBoot的Spring WebApplicationInitializer实现，除了配置Spring的DispatcherServlet，他还会在Spring应用程序上下文中查找Filter、Servlet或者ServletContextInitializer类型的bean，将它们绑定到Servlet容器中。    
 
+Spring WebApplicationInitializer实现就是用来替代web.xml配置的，具体如何实现替代的，参看下面这篇文章：[SpringBoot 中的 ServletInitializer](https://blog.csdn.net/qq_28289405/article/details/81279742)    
+[在spring boot中配置多个DispatcherServlet](https://blog.csdn.net/tiger0709/article/details/78909417)
 
 

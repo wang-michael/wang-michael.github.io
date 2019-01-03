@@ -8,14 +8,40 @@ Java运行时数据区：Java虚拟机规定JVM在执行java程序的过程中�
 Java虚拟机帮助运行在其上的Java进程完成内存管理操作，可以理解为Java虚拟机在启动时向os 通过malloc操作申请了一大块内存，之后运行在其上的java进程使用的内存就由jvm来管理，当jvm发现可用的内存不够的时候，就进行垃圾收集操作，如果还不够，就再向os申请内存。
 通过Java运行时数据区完成的内存管理操作是符合Java内存模型的。
 JAVA内存模型中涉及到的主内存和工作内存等概念与Java运行时数据区中的Java堆、栈、方法区等并不是同一个层次上的内存划分，这两者基本上是没有关系的，JMM是为了解决防止同一套并发程序不同平台上运行不兼容的问题(比如在编译时插入一些屏障指令防止os或硬件优化对指令重排序)；Java运行时数据区规定了各个厂家实现JVM时的进行内存管理的一套规范，各个厂家在实现这个规范的时候给出的最后JVM产品一定是满足JVM内存模型的。
-
 JMM重点解决的问题是主内存与工作内存的交互的问题(不管主内存与工作内存在JVM中怎么实现)，Java运行时数据区重点解决的问题是主内存与工作内存在JVM中具体怎么实现的问题；JVM实现时通过JAVA编译器(比如在编译时插入一些屏障指令防止os或硬件优化对指令重排序)与Java运行时数据区的配合才可以满足JMM中的规定。
 
 JMM中的主内存与工作内存如果一定要对应到Java运行时数据区中的话，可以认为主内存对应于Java堆中的对象实例数据部分(Java堆中对象除了对象实例数据，还包含对象的MarkWord、对象类型数据指针以及用于字节对其的数据填充)，而工作内存对应于虚拟机栈中的部分区域。
 
 ### GC相关
+**Minor GC触发条件：**当young gen中的eden区分配满的时候触发。注意young GC中有部分存活对象会晋升到old gen，所以young GC后old gen的占用量通常会有所升高。  
+  
+**Major GC触发条件（只有CMS存在Major/old gc的概念，其余老年代收集器Major GC = Full GC）：**(1)GC收集器根据条件判断的(是不是只有CMS有这种条件判断？？？对于其他老年代收集器器只有条件1)：以CMS GC为例，它主要是定时去检查old gen的使用量，当使用量超过了触发比例就会启动一次CMS GC，对old gen做并发收集。  
+    
+**Full GC触发条件：**(1)当准备要触发一次young GC时，如果发现统计数据说之前young GC的平均晋升大小比目前old gen剩余的空间大，则不会触发young GC而是转为触发full GC (2)如果有perm gen的话，要在perm gen分配空间但已经没有足够空间时，也要触发一次full GC； (3)System.gc()、heap dump带GC，默认也是触发full GC。 (4)即使之前young GC的平均晋升大小<=目前old gen剩余的空间，但old gen剩余的空间（剩余空间是否要求连续？？？）<(Eden.used+From.used)，也会触发Full GC  
+
+Full GC本身不会先进行Minor GC，我们可以配置-XX:+ScavengeBeforeFullGC（非CMS回收算法）、CMSScavengeBeforeRemark（CMS回收算法）可以，让Full GC之前先进行一次Minor GC，因为老年代很多对象都会引用到新生代的对象，先进行一次Minor GC可以提高老年代GC的速度。   
+
+**HotSpot VM只有CMS的concurrent collection可以做到只收集old gen,其余用于老年代的收集器在收集的时候都是收集整个堆，所以对于除了CMS收集器之外的其它老年代的收集器，MajorGC是等于FullGC的，因为都是收集整个堆。**  
+
+
+[Full GC为什么那么慢？为什么老年代垃圾回收效率比新生代低很多？为什么Minor gc速度比Major GC慢？](https://blog.csdn.net/sinlff/article/details/70138651)  
+
 在发生Minor GC之前，虚拟机会先检查老年代最大可用的连续空间是否大于新生代所有对象总空间，如果这个条件成立。那么Minor GC可以确保是安全的，如果不成立，则需要进行一次Full GC。  
-问题：新生代总空间900M，含有两个250M的大对象，老年代900M，也含有两个250M的大对象；现在要新创建一个占用空间为500M的大对象，新生代容纳不下，进行minor gc之前发现老年代最大可用的连续空间小于新生代所有对象总空间，所以需要改为进行full gc，假设full gc之后这4个250M大对象都没有被回收，那么此500M的大对象是否可以被分配？如果可以的话，是不是由于把新生代的一个250M的大对象在Full GC的时候搬运到了老年代，导致新生代有一个250M的大对象，老年代有3个250M的大对象，之后新来的这个对象在新生代分配，新生代占用了500+250=750M，老年代也占用了250*3=750M？？？  
+
+**老年代使用CMS算法，可能在老年代产生很多内存碎片，这样在新生代中分配一个大对象时，就可能出现往往老年代还有很大剩余空间，但无法找到足够大的连续空间来分配当前对象,不得不触发一次Full GC(ParNew GC + CMS GC + PermGC)。CMS的解决方案是使用UseCMSCompactAtFullCollection参数(默认开启)，在识别出是由于这种情况引起的Full GC时开启内存碎片整理。**    
+
+**CMS并发GC不是“full GC”。CMS GC要决定是否在full GC时做压缩，会依赖几个条件。**其中， 
+第一种条件，UseCMSCompactAtFullCollection 与 CMSFullGCsBeforeCompaction 是搭配使用的；前者目前默认就是true了，也就是关键在后者上。 
+第二种条件是用户调用了System.gc()，而且DisableExplicitGC没有开启。 
+第三种条件是young gen报告接下来如果做增量收集会失败；简单来说也就是young gen预计old gen没有足够空间来容纳下次young GC晋升的对象。 
+上述三种条件的任意一种成立都会让CMS决定这次做full GC时要做压缩。 
+
+CMSFullGCsBeforeCompaction 说的是，在上一次CMS并发GC执行过后，到底还要再执行多少次full GC才会做压缩。默认是0，也就是在默认配置下每次CMS GC顶不住了而要转入full GC的时候都会做压缩。 把CMSFullGCsBeforeCompaction配置为10，就会让上面说的第一个条件变成每隔10次真正的full GC才做一次压缩（而不是每10次CMS并发GC就做一次压缩，目前VM里没有这样的参数）。这会使full GC更少做压缩，也就更容易使CMS的old gen受碎片化问题的困扰。 本来这个参数就是用来配置降低full GC压缩的频率，以期减少某些full GC的暂停时间。CMS回退到full GC时用的算法是mark-sweep-compact，但compaction是可选的，不做的话碎片化会严重些但这次full GC的暂停时间会短些；这是个取舍。  
+
+参考[JVM调优——之CMS 常见参数解析](https://www.cnblogs.com/onmyway20xx/p/6605324.html)
+  
+**问题：**新生代总空间900M，含有两个250M的大对象，老年代900M，也含有两个250M的大对象；现在要新创建一个占用空间为500M的大对象，新生代容纳不下，进行minor gc之前发现老年代最大可用的连续空间小于新生代所有对象总空间，所以需要改为进行full gc，假设full gc之后这4个250M大对象都没有被回收，那么此500M的大对象是否可以被分配？如果可以的话，是不是由于把新生代的一个250M的大对象在Full GC的时候搬运到了老年代，导致新生代有一个250M的大对象，老年代有3个250M的大对象，之后新来的这个对象在新生代分配，新生代占用了500+250=750M，老年代也占用了250*3=750M？？？  
+
 
 **为什么要求老年代的空间大于新生代的空间呢？(老年代与新生代的空间比例至少是1：1)**   
 因为新生代进行minor GC的时候需要空间分配担保，如果老年代空间小于新生代空间，就可能出现频繁Full GC，这是不能接受的。因为新生代一般等到所剩的空间无法给新来的对象再分配的时候才会进行minor GC，如果老年代空间小于新生代空间，比如老年代为500M，新生代为1G，那么就可能出现新生代空间为900M，需要新分配一个200M的空间给新来的对象，检测到空间不足了，准备进行minor GC，但是检测到老年代可用内存空间不足以容纳新生代所有对象，于是改为进行full GC，这就不行了，本来一次minor gc就可以解决的问题，变成了一次full gc！！！    
@@ -24,6 +50,8 @@ JMM中的主内存与工作内存如果一定要对应到Java运行时数据区�
 
 **将长期存活的大对象放在堆外可以减少Full GC，why？？？**  
 可能是由于长期存活的大对象如果在老年代的话，可能会经常引起minor gc时的内存分配担保失败，这样就会经常造成由minor gc到full gc的转化，将其放在堆外可以减少fullgc次数，并且可以减少full gc 时stw的时间(不需要扫描这块大对象对应的内存)。    
+
+优秀文章：[精品-从实际案例聊聊Java应用的GC优化](https://www.mtyun.com/library/jvm_optimize)  
 
 #### 内存分配担保机制
 新生代默认有一块Eden区域，两块Survivor区域；新生代的收集过程是先标记eden+一块survivor中的区域的存活的对象，标记之后将其复制到另外一块survivor区域中，之后将eden和那一块survivor中的所有空间直接清除，这样效率比较高；由于新生代的对象中98%都是朝生夕灭的，所以标记之后存活的对象往往很少，survivor区域并不需要设置的很大，eden区域与两个survivor区域的比值的默认设置是8:1:1，大部分情况下来说survivor区域都足以容纳minor gc标记后存活的对象了。但是假设这种极端的情况。标记之后发现eden与其中一块survivor区域所有的对象都仍然存活，那怎么办呢？**这个时候就需要老年代进行内存分配担保，保证老年代剩余的空间+一块survivor的空间可以容纳新生代中的标记之后的存活的对象。**如果内存分配担保成功，这时可以进行一次minor gc，否则就要改为进行一次full gc。  
@@ -52,7 +80,7 @@ JMM中的主内存与工作内存如果一定要对应到Java运行时数据区�
 
 OopMap结构可以用来解决这个问题，虚拟机使用这个数据结构可以直接得知哪些地方存放着对象引用，这样，GC在扫描时就可以直接得知这些信息了。  
 
-**问题：**对于扫描虚拟机栈与本地方法栈的引用加入OopMap，我的理解仍然是需要扫描整个虚拟机栈栈和本地方法栈，这个是避免不了的，而对于方法区，由于在类加载时就将对应的对象引用所在位置就加入了OopMap中，所以并不需要遍历方法区。对吗？？？      
+**问题：**对于扫描虚拟机栈与本地方法栈的引用加入OopMap，我的理解仍然是需要扫描整个虚拟机栈和本地方法栈，这个是避免不了的，而对于方法区，由于在类加载时就将对应的对象引用所在位置就加入了OopMap中，所以并不需要遍历方法区。对吗？？？      
 
 **对于OopMap结构，我觉得可以分为两种：一、外部记录GC Roots引用的OopMap，通过这个OopMap可以快速枚举到所有的GC Roots对象；二、对象的类型信息里有记录自己的OopMap，这个是由HotSpot在类加载完成的时候将对象内什么偏移量上是什么类型的数据计算出来后放在对象内部的OopMap中的。**  
 
@@ -118,12 +146,20 @@ HotSpot并不是在每条指令执行时，每个时刻都更新OopMap，而仅�
 * 原来标记的不能到达的对象现在又可以到达了(为什么会出现这种情况？？？是因为finalized吗？？？)      
 5. CMS收集器无法处理浮动垃圾，可能出现“Concurrent Mode Failure”导致另一次Full GC的产生。由于CMS并发清理阶段用户线程还在不断运行，所以肯定会有新的垃圾产生，**这一部分垃圾出现在标记过程之后(这里的标记过程指的是上面说的Initial mark吗？？？)，CMS无法在当次垃圾收集中处理掉他们，只好留待下一次GC时再清理掉。**要是CMS在运行过程中预留的内存无法满足程序需要，就会出现“Concurrent Mode Failure”，这时虚拟机就会启动后后备预案，临时启用Serial Old进行老年代的垃圾收集，不过这时STW时间就很长了。  
 
+[为什么CMS两次标记时要 stop the world（阿里面试）](https://blog.csdn.net/fhy569039351/article/details/83960709)
+[关于CMS、G1垃圾回收器的重新标记、最终标记疑惑?](https://www.zhihu.com/question/37028283/answer/78008095)  
+
+[精品文章-不可错过的CMS学习笔记](https://www.jianshu.com/p/78017c8b8e0f)  
+
 #### Minor GC与Full/Major GC日志分析
 **问题：**如何根据GC日志计算GC实际耗时呢？   
 
 Major GC STW的两个阶段：Phase 1: Initial Mark：，Phase 5: Final Remark  
 参考：[GC之详解CMS收集过程和日志分析](https://www.cnblogs.com/zhangxiaoguang/p/5792468.html);  
 [Java GC 日志详解（一图读懂）](https://blog.csdn.net/wanglha/article/details/48713217)
+
+推荐阅读的GC相关书籍：
+《The Garbage Collection Handbook》(https://book.douban.com/subject/6809987/)
 
 
 
