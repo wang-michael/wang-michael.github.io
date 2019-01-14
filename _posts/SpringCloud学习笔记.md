@@ -59,7 +59,7 @@ Eureka进入自我保护模式通常是因为多个服务实例与此Eureka之�
 1. 不能用localhost比如： 
 eureka.client.serviceUrl.defaultZone=http://localhost:2222/eureka/ 
 要采用： 
-eureka.instance.hostname=master 
+eureka.instance.hostname=master  // 这个配置的作用是注册到eureka上时使用这个主机名，不会去尝试在程序中获取本机的ip之后去注册。  
 eureka.client.serviceUrl.defaultZone=http://backup:2222/eureka/ 
 ＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝ 
 eureka.instance.hostname=backup 
