@@ -187,6 +187,10 @@ Java原生JDBC：java访问数据库的基石，其它框架如Hibernate、MyBat
 
 先找到配置文件(xml文件即application-context.xml,java文件即含有@Configuration注解标注的文件)，加载配置文件，对配置文件中的默认标签(默认注解)以及自定义标签(自定义注解)进行解析，解析过程如上述链接所述。  
 
+每一个Java注解都有自己对应的注解处理器，在注解处理器中进行注解的相关处理工作，实现注解的作用。@EnableScheduling注解和<task:annotation-driven>标签实现的功能是一样的，<task:annotation-driven>由在spring-tx包下的META-INF/Spring.handlers：http\:// www.springframework.org/schema/tx=org.springframework.transaction.config.TxNamespaceHandler规定了对应关系之后反射加载TxNamespaceHandler进行处理，可以认为@EnableScheduling注解对应的注解处理器实现的功能与TxNamespaceHandler是一致的，这里不再进行深究，关于java注解的处理以及如何自己创建一个注解以及编写对应的注解处理器，可以参考：[Java中的注解(Annotation)处理器解析](https://blog.csdn.net/yang_yang1994/article/details/79729621)   
+
+@EnableScheduling注解与@Schedule注解配合使用(或者<task:annotation-driven>与Schedule标签配合使用)实现了Spring定时任务功能的应用上的简易性。@EnableScheduling注解处理器做的最重要一个工作就是注册了一个ScheduledAnnotationBeanPostProcessor，@Schedule注解处理器的作用是在BeanDefinition中标记需要被ScheduledAnnotationBeanPostProcessor处理的方法，之后在Bean实际被创建时由ScheduledAnnotationBeanPostProcessor开启相应的定时任务。  
+
 ## 代码分析心得
 以组件的方式对每种框架进行分析。从Demo开始进行分析。    
 
