@@ -435,6 +435,15 @@ public void execute(Runnable command) {
 2. 如果运行的线程等于或多于corePoolSize,则将任务加入BlockingQueue
 3. 如果无法将任务加入BlockingQueue(队列已满)，则创建新的线程来处理任务(注意，执行这一步骤需要获取全局锁)
 4. 如果创建新线程将使当前运行的线程超出maximumPoolSize,任务将被拒绝，并调用拒绝策略来处理
+5. 线程池减少工作线程的策略参见下面对于getTask()方法的分析
+
+从上面的策略中可以看出线程池**刚刚被创建的时候内部的线程数为0**，会遵循上面的策略增加与减少线程。     
+
+ThreadPoolExecutor提供了几种线程池的拒绝策略(当然也可以自定义)：  
+* ThreadPoolExecutor.AbortPolicy:丢弃任务并抛出RejectedExecutionException异常。(默认策略)
+* ThreadPoolExecutor.DiscardPolicy：也是丢弃任务，但是不抛出异常。
+* ThreadPoolExecutor.DiscardOldestPolicy：丢弃队列最前面的任务，然后重新尝试执行任务（重复此过程）
+* ThreadPoolExecutor.CallerRunsPolicy：由调用线程处理该任务
 
 ThreadPoolExecutor采取上述步骤的总体设计思路，是为了在执行execute()方法时，尽可能的避免获取全局锁。在ThreadPoolExecutor完成预热之后(当前运行的线程数大于等于corePoolSize)，几乎所有的execute()方法调用都是执行步骤2，而步骤2不需要获取全局锁。
   
@@ -571,7 +580,7 @@ private final class Worker
     Worker(Runnable firstTask) {
         setState(-1); // inhibit interrupts until runWorker
         this.firstTask = firstTask;
-        /把Worker传递给新建的线程，当线程执行是会调用Worker的run方法。
+        //把Worker传递给新建的线程，当线程执行是会调用Worker的run方法。
         this.thread = getThreadFactory().newThread(this);
     }
     /** Delegates main run loop to outer runWorker  */
@@ -750,6 +759,11 @@ private Runnable getTask() {
    }
 }
 ```
+上面方法中可以看到线程池何时会减少工作线程：    
+1、如果不设置allowCoreThreadTimeOut的话，在核心线程数之前创建的线程永不超时，在核心线程数之后创建的线程有超时时间。  
+2、减少工作线程的条件：((wc > maximumPoolSize || (timed && timedOut)) && (wc > 1 || workQueue.isEmpty()))  
+
+如果allowCoreThreadTimeOut为false(默认为false)，即使核心线程并没有任务需要他来执行，它也会仍然保持存活，等待新任务的到来；如果allowCoreThreadTimeOut被设置为true，当指定时间之内并没有从工作队列中获得需要执行的任务的话，线程可能会被销毁，之后需要的时候再去创建。     
 
 #### **结束线程池**  
 两个方法，shutDown与shutDownNow：
