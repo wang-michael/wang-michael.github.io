@@ -35,7 +35,11 @@ public class ScheduledTasks {
 
 }
 ```
-方式二：Spring官方文档中有介绍到spring定时任务功能的实现主要基于两个接口：1、TaskExecutor 2、TaskScheduler，其中TaskScheduler接口的实现类只有两个，ThreadPoolTaskScheduler与ConcurrentTaskScheduler。下面就是一个使用ThreadPoolTaskScheduler方式可动态添加修改定时任务的Demo：  
+方式二：Spring官方文档中有介绍到spring定时任务功能的实现主要基于两个接口：  
+
+  1、TaskExecutor 2、TaskScheduler，
+
+其中TaskScheduler接口的实现类只有两个，ThreadPoolTaskScheduler与ConcurrentTaskScheduler。下面就是一个使用ThreadPoolTaskScheduler方式实现可动态添加修改定时任务的Demo：  
 ```java
 @RestController
 @Component
@@ -91,7 +95,7 @@ public class DynamicTask {
 ### **原理分析**
 ### **方式二原理分析**
 先来分析上面第二种方式ThreadPoolTaskScheduler的实现原理。  
-<img src="/img/2019-1-22/ThreadPoolTaskSchedulerUML.png" width="700" height="700" alt="ThreadPoolTaskSchedulerUML" />
+<img src="/img/2019-1-23/ThreadPoolTaskSchedulerUML.png" width="700" height="700" alt="ThreadPoolTaskSchedulerUML" />
 <center>ThreadPoolTaskSchedulerUML图示</center>  
 ```java
 public class ThreadPoolTaskScheduler extends ExecutorConfigurationSupport implements AsyncListenableTaskExecutor, SchedulingTaskExecutor, TaskScheduler {
@@ -228,7 +232,7 @@ public ThreadPoolTaskScheduler threadPoolTaskScheduler() {
 ```
 否则上面ExecutorConfigurationSupport.afterPropertiesSet方法根本不会被框架调用，ThreadPoolTaskScheduler中的ScheduledExecutorService不会被注入，所以ThreadPoolTaskScheduler也就不会起作用了。     
 
-接着再来来分析上面Demo中第一种方式的实现原理。
+接着再来分析上面Demo中第一种方式的实现原理。
    
 ### **方式一原理分析**
 方式一中使用了@EnableScheduling结合@Scheduled注解实现对定时任务的调度。@Scheduled注解的作用可以理解为在BeanDefinition中添加了被作为定时任务的方法的标记，下面来看@EnableScheduling注解的作用：  
@@ -395,6 +399,6 @@ public class ScheduledTaskRegistrar implements InitializingBean, DisposableBean 
 经过上面分析可见，在默认情况下，结合使用@EnableScheduling与@Scheduled注解进行任务调度，实际进行调度操作的是corePoolSize为1的ScheduledThreadPoolExecutor。  
 
 ### **总结**
-经过上面的分析过程可以看到，Spring定时任务调度是在ScheduledThreadPoolExecutor使用适配器模式进行封装，引入cron表达式功能，使得定时任务调度功能使用起来更加方便。  
+经过上面的分析过程可以看到，Spring定时任务调度是在ScheduledThreadPoolExecutor基础之上再使用适配器模式进行封装，引入了cron表达式功能，使得定时任务调度功能使用起来更加方便。    
 
-但是到目前为止介绍的几种定时任务调度都仅仅适用于单机情况下，在集群应用当中或者分布式应用当中，如果我们想确保集群中的某个任务仅被执行一次(不能仅把任务添加到集群中的一台服务器的任务队列中，因为这样集群就没有意义了，如果这台服务器宕机了，这个任务就不会被执行)，还需要在Spring定时任务调度的基础之上进行封装，比如结合Redis的分布式锁功能来实现，也可以使用下篇文章中要介绍的Quartz框架结合Spring使用。  
+但是到目前为止介绍的几种定时任务调度都仅仅适用于单机情况下，在集群应用当中或者分布式应用当中，如果我们想确保集群中的某个任务仅被执行一次(不能仅把任务添加到集群中的一台服务器的任务队列中，因为这样集群就没有意义了，如果这台服务器宕机了，这个任务就不会被执行)，还需要在Spring定时任务调度的基础之上进行封装，比如结合Redis的分布式锁功能来实现，也可以使用下篇文章中要介绍的Quartz框架结合Spring使用来实现。    
