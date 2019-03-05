@@ -220,6 +220,8 @@ public @interface WiselyConfiguration {
 
 }
 ```  
+**@ConditionalOnMissingBean注解：**Spring Boot的自动配置机制依靠@ConditionalOnMissingBean注解判断是否执行初始化代码，即如果用户已经创建了被@ConditionalOnMissingBean注解标注的待创建的bean，则相关的初始化代码不再执行。  
+参考文章：[配置是否初始化Bean的方法](https://www.jianshu.com/p/332e2bc810bc)  
 
 **@Conditional注解：**在满足@Conditional中的特定条件的时候才创建此特定的Bean。使用示例：
 ```java
